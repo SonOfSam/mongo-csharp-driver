@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -17,17 +17,14 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
-using System.Text;
-using System.Threading.Tasks;
+using FluentAssertions;
+using MongoDB.Bson;
+using MongoDB.Bson.IO;
 using MongoDB.Bson.Serialization;
 using MongoDB.Driver.Linq.Translators;
-using MongoDB.Driver.Linq.Utils;
 using NUnit.Framework;
-using FluentAssertions;
-using MongoDB.Bson.IO;
-using MongoDB.Bson;
 
-namespace MongoDB.Driver.Core.Linq
+namespace MongoDB.Driver.Tests.Linq.Translators
 {
     [TestFixture]
     public class FindProjectionTranslatorTests
@@ -238,7 +235,7 @@ namespace MongoDB.Driver.Core.Linq
         private ProjectedResult<T> Project<T>(Expression<Func<Root, T>> projector, string json)
         {
             var serializer = BsonSerializer.SerializerRegistry.GetSerializer<Root>();
-            var projectionInfo = FindProjectionTranslator.Translate<Root, T>(projector, serializer);
+            var projectionInfo = FindProjectionTranslator.Translate<Root, T>(projector, serializer, BsonSerializer.SerializerRegistry);
 
             using (var reader = new JsonReader(json))
             {
@@ -246,7 +243,7 @@ namespace MongoDB.Driver.Core.Linq
                 return new ProjectedResult<T>
                 {
                     Projection = projectionInfo.Document,
-                    Value = projectionInfo.ResultSerializer.Deserialize(context)
+                    Value = projectionInfo.ProjectionSerializer.Deserialize(context)
                 };
             }
         }

@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -56,9 +56,16 @@ namespace MongoDB.Driver.Tests.Specifications.crud
             return new UpdateResult.Acknowledged(expectedResult["matchedCount"].ToInt64(), modifiedCount, upsertedId);
         }
 
-        protected override Task<UpdateResult> ExecuteAndGetResultAsync(IMongoCollection<BsonDocument> collection)
+        protected override UpdateResult ExecuteAndGetResult(IMongoCollection<BsonDocument> collection, bool async)
         {
-            return collection.UpdateOneAsync(_filter, _update, _options);
+            if (async)
+            {
+                return collection.UpdateOneAsync(_filter, _update, _options).GetAwaiter().GetResult();
+            }
+            else
+            {
+                return collection.UpdateOne(_filter, _update, _options);
+            }
         }
 
         protected override void VerifyResult(UpdateResult actualResult, UpdateResult expectedResult)

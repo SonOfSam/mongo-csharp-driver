@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+﻿/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -24,7 +24,23 @@ namespace MongoDB.Bson
     [Serializable]
     public class BsonInt64 : BsonValue, IComparable<BsonInt64>, IEquatable<BsonInt64>
     {
-        // private fields
+         #region static
+        const long __minPrecreatedValue = -100L;
+        const long __maxPrecreatedValue = 100L;
+        private static readonly BsonInt64[] __precreatedInstances = new BsonInt64[__maxPrecreatedValue - __minPrecreatedValue + 1];
+
+        static BsonInt64()
+        {
+            for (var i = __minPrecreatedValue; i <= __maxPrecreatedValue; i++)
+            {
+                var precreatedInstance = new BsonInt64(i);
+                var index = i - __minPrecreatedValue;
+                __precreatedInstances[index] = precreatedInstance;
+            }
+        }
+        #endregion
+
+       // private fields
         private long _value;
 
         // constructors
@@ -71,6 +87,11 @@ namespace MongoDB.Bson
         /// <returns>A BsonInt64.</returns>
         public static implicit operator BsonInt64(long value)
         {
+            if (value >= __minPrecreatedValue && value <= __maxPrecreatedValue)
+            {
+                var index = value - __minPrecreatedValue;
+                return __precreatedInstances[index];
+            }
             return new BsonInt64(value);
         }
 
@@ -231,6 +252,104 @@ namespace MongoDB.Bson
         }
 
         // protected methods
+        /// <inheritdoc/>
+        protected override TypeCode IConvertibleGetTypeCodeImplementation()
+        {
+            return TypeCode.Int64;
+        }
+
+        /// <inheritdoc/>
+        protected override bool IConvertibleToBooleanImplementation(IFormatProvider provider)
+        {
+            return Convert.ToBoolean(_value, provider);
+        }
+
+        /// <inheritdoc/>
+        protected override byte IConvertibleToByteImplementation(IFormatProvider provider)
+        {
+            return Convert.ToByte(_value, provider);
+        }
+
+        /// <inheritdoc/>
+        protected override char IConvertibleToCharImplementation(IFormatProvider provider)
+        {
+            return Convert.ToChar(_value, provider);
+        }
+
+        /// <inheritdoc/>
+        protected override decimal IConvertibleToDecimalImplementation(IFormatProvider provider)
+        {
+            return Convert.ToDecimal(_value, provider);
+        }
+
+        /// <inheritdoc/>
+        protected override double IConvertibleToDoubleImplementation(IFormatProvider provider)
+        {
+            return Convert.ToDouble(_value, provider);
+        }
+
+        /// <inheritdoc/>
+        protected override short IConvertibleToInt16Implementation(IFormatProvider provider)
+        {
+            return Convert.ToInt16(_value, provider);
+        }
+
+        /// <inheritdoc/>
+        protected override int IConvertibleToInt32Implementation(IFormatProvider provider)
+        {
+            return Convert.ToInt32(_value, provider);
+        }
+
+        /// <inheritdoc/>
+        protected override long IConvertibleToInt64Implementation(IFormatProvider provider)
+        {
+            return _value;
+        }
+
+        /// <inheritdoc/>
+#pragma warning disable 3002
+        protected override sbyte IConvertibleToSByteImplementation(IFormatProvider provider)
+        {
+            return Convert.ToSByte(_value, provider);
+        }
+#pragma warning restore
+
+        /// <inheritdoc/>
+        protected override float IConvertibleToSingleImplementation(IFormatProvider provider)
+        {
+            return Convert.ToSingle(_value, provider);
+        }
+
+        /// <inheritdoc/>
+        protected override string IConvertibleToStringImplementation(IFormatProvider provider)
+        {
+            return Convert.ToString(_value, provider);
+        }
+
+        /// <inheritdoc/>
+#pragma warning disable 3002
+        protected override ushort IConvertibleToUInt16Implementation(IFormatProvider provider)
+        {
+            return Convert.ToUInt16(_value, provider);
+        }
+#pragma warning restore
+
+        /// <inheritdoc/>
+#pragma warning disable 3002
+        protected override uint IConvertibleToUInt32Implementation(IFormatProvider provider)
+        {
+            return Convert.ToUInt32(_value, provider);
+        }
+#pragma warning restore
+
+        /// <inheritdoc/>
+#pragma warning disable 3002
+        protected override ulong IConvertibleToUInt64Implementation(IFormatProvider provider)
+        {
+            return Convert.ToUInt64(_value, provider);
+        }
+#pragma warning restore
+       
         /// <summary>
         /// Compares this BsonInt32 against another BsonValue.
         /// </summary>

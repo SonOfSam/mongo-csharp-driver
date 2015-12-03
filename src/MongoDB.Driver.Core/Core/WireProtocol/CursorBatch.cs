@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -43,7 +43,7 @@ namespace MongoDB.Driver.Core.WireProtocol
             IReadOnlyList<TDocument> documents)
         {
             _cursorId = cursorId;
-            _documents = Ensure.IsNotNull(documents, "documents");
+            _documents = Ensure.IsNotNull(documents, nameof(documents));
         }
 
         // properties

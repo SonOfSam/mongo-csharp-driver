@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -23,56 +23,62 @@ using System.Text.RegularExpressions;
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization;
 using MongoDB.Bson.Serialization.Options;
-using MongoDB.Driver.Linq.Processors;
-using MongoDB.Driver.Linq.Utils;
-using MongoDB.Driver.Linq.Translators;
 using MongoDB.Driver.Linq.Expressions;
+using MongoDB.Driver.Linq.Expressions.ResultOperators;
+using MongoDB.Driver.Linq.Processors;
+using MongoDB.Driver.Support;
 
 namespace MongoDB.Driver.Linq.Translators
 {
-    /// <summary>
-    /// Translates an expression tree into a <see cref="FilterDefinition{TDocument}"/>.
-    /// </summary>
-    internal class PredicateTranslator
+    internal sealed class PredicateTranslator
     {
         private static readonly FilterDefinitionBuilder<BsonDocument> __builder = new FilterDefinitionBuilder<BsonDocument>();
 
         public static BsonDocument Translate<TDocument>(Expression<Func<TDocument, bool>> predicate, IBsonSerializer<TDocument> parameterSerializer, IBsonSerializerRegistry serializerRegistry)
         {
-            // TODO: revisit this...
-            var parameterSerializationInfo = new BsonSerializationInfo(null, parameterSerializer, parameterSerializer.ValueType);
-            var parameterExpression = new SerializationExpression(predicate.Parameters[0], parameterSerializationInfo);
-            var binder = new SerializationInfoBinder(BsonSerializer.SerializerRegistry);
-            binder.RegisterParameterReplacement(predicate.Parameters[0], parameterExpression);
-            var normalizedBody = Normalizer.Normalize(predicate.Body);
-            var evaluatedBody = PartialEvaluator.Evaluate(normalizedBody);
-            var boundExpression = binder.Bind(evaluatedBody);
+            var parameterExpression = new DocumentExpression(parameterSerializer);
+            var context = new PipelineBindingContext(BsonSerializer.SerializerRegistry);
+            context.AddExpressionMapping(predicate.Parameters[0], parameterExpression);
 
+            var node = PartialEvaluator.Evaluate(predicate.Body);
+            node = Transformer.Transform(node);
+            node = context.Bind(node);
+
+            return Translate(node, serializerRegistry);
+        }
+
+        public static BsonDocument Translate(Expression node, IBsonSerializerRegistry serializerRegistry)
+        {
             var translator = new PredicateTranslator();
-            return translator.BuildFilter(boundExpression)
+            node = FieldExpressionFlattener.FlattenFields(node);
+            return translator.Translate(node)
                 .Render(serializerRegistry.GetSerializer<BsonDocument>(), serializerRegistry);
         }
 
-        private FilterDefinition<BsonDocument> BuildFilter(Expression expression)
+        private PredicateTranslator()
+        {
+        }
+
+        private FilterDefinition<BsonDocument> Translate(Expression node)
         {
             FilterDefinition<BsonDocument> filter = null;
 
-            switch (expression.NodeType)
+            switch (node.NodeType)
             {
                 case ExpressionType.And:
-                    filter = BuildAndQuery((BinaryExpression)expression);
+                    filter = TranslateAnd((BinaryExpression)node);
                     break;
                 case ExpressionType.AndAlso:
-                    filter = BuildAndAlsoQuery((BinaryExpression)expression);
+                    filter = TranslateAndAlso((BinaryExpression)node);
                     break;
                 case ExpressionType.ArrayIndex:
-                    filter = BuildBooleanQuery(expression);
+                    filter = TranslateBoolean(node);
                     break;
                 case ExpressionType.Call:
-                    filter = BuildMethodCallQuery((MethodCallExpression)expression);
+                    filter = TranslateMethodCall((MethodCallExpression)node);
                     break;
                 case ExpressionType.Constant:
-                    filter = BuildConstantQuery((ConstantExpression)expression);
+                    filter = TranslateConstant((ConstantExpression)node);
                     break;
                 case ExpressionType.Equal:
                 case ExpressionType.GreaterThan:
@@ -80,34 +86,38 @@ namespace MongoDB.Driver.Linq.Translators
                 case ExpressionType.LessThan:
                 case ExpressionType.LessThanOrEqual:
                 case ExpressionType.NotEqual:
-                    filter = BuildComparisonQuery((BinaryExpression)expression);
+                    filter = TranslateComparison((BinaryExpression)node);
                     break;
                 case ExpressionType.MemberAccess:
-                    filter = BuildBooleanQuery(expression);
+                    filter = TranslateBoolean(node);
                     break;
                 case ExpressionType.Not:
-                    filter = BuildNotQuery((UnaryExpression)expression);
+                    filter = TranslateNot((UnaryExpression)node);
                     break;
                 case ExpressionType.Or:
-                    filter = BuildOrQuery((BinaryExpression)expression);
+                    filter = TranslateOr((BinaryExpression)node);
                     break;
                 case ExpressionType.OrElse:
-                    filter = BuildOrElseQuery((BinaryExpression)expression);
+                    filter = TranslateOrElse((BinaryExpression)node);
                     break;
                 case ExpressionType.TypeIs:
-                    filter = BuildTypeIsQuery((TypeBinaryExpression)expression);
+                    filter = TranslateTypeIsQuery((TypeBinaryExpression)node);
                     break;
                 case ExpressionType.Extension:
-                    var mongoExpression = expression as MongoExpression;
+                    var mongoExpression = node as ExtensionExpression;
                     if (mongoExpression != null)
                     {
-                        switch(mongoExpression.MongoNodeType)
+                        switch (mongoExpression.ExtensionType)
                         {
-                            case MongoExpressionType.Serialization:
+                            case ExtensionExpressionType.FieldAsDocument:
+                            case ExtensionExpressionType.Field:
                                 if (mongoExpression.Type == typeof(bool))
                                 {
-                                    filter = BuildBooleanQuery(mongoExpression);
+                                    filter = TranslateBoolean(mongoExpression);
                                 }
+                                break;
+                            case ExtensionExpressionType.Pipeline:
+                                filter = TranslatePipeline((PipelineExpression)node);
                                 break;
                         }
                     }
@@ -116,7 +126,7 @@ namespace MongoDB.Driver.Linq.Translators
 
             if (filter == null)
             {
-                var message = string.Format("Unsupported filter: {0}.", expression);
+                var message = string.Format("Unsupported filter: {0}.", node);
                 throw new ArgumentException(message);
             }
 
@@ -124,60 +134,67 @@ namespace MongoDB.Driver.Linq.Translators
         }
 
         // private methods
-        private FilterDefinition<BsonDocument> BuildAndAlsoQuery(BinaryExpression binaryExpression)
+        private FilterDefinition<BsonDocument> TranslateAndAlso(BinaryExpression node)
         {
-            return __builder.And(BuildFilter(binaryExpression.Left), BuildFilter(binaryExpression.Right));
+            return __builder.And(Translate(node.Left), Translate(node.Right));
         }
 
-        private FilterDefinition<BsonDocument> BuildAndQuery(BinaryExpression binaryExpression)
+        private FilterDefinition<BsonDocument> TranslateAnd(BinaryExpression node)
         {
-            if (binaryExpression.Left.Type == typeof(bool) && binaryExpression.Right.Type == typeof(bool))
+            if (node.Left.Type == typeof(bool) && node.Right.Type == typeof(bool))
             {
-                return BuildAndAlsoQuery(binaryExpression);
+                return TranslateAndAlso(node);
             }
 
             return null;
         }
 
-        private FilterDefinition<BsonDocument> BuildAnyQuery(MethodCallExpression methodCallExpression)
+        private bool CanAnyBeRenderedWithoutElemMatch(Expression node)
         {
-            if (methodCallExpression.Method.DeclaringType == typeof(Enumerable))
+            switch (node.NodeType)
             {
-                var arguments = methodCallExpression.Arguments.ToArray();
-                var serializationInfo = GetSerializationInfo(arguments[0]);
-                if (arguments.Length == 1)
-                {
-                    return __builder.And(
-                        __builder.Ne(serializationInfo.ElementName, BsonNull.Value),
-                        __builder.Not(__builder.Size(serializationInfo.ElementName, 0)));
-                }
-                else if (arguments.Length == 2)
-                {
-                    var itemSerializationInfo = GetItemSerializationInfo("Any", serializationInfo);
-
-                    var lambda = (LambdaExpression)arguments[1];
-                    var body = PrefixedFieldRenamer.Rename(lambda.Body, serializationInfo.ElementName);
-                    var filter = __builder.ElemMatch(serializationInfo.ElementName, BuildFilter(body));
-
-                    if (!(itemSerializationInfo.Serializer is IBsonDocumentSerializer))
+                // this doesn't cover all cases, but absolutely covers
+                // the most common ones. This is opt-in behavior, so
+                // when someone else discovers an Any query that shouldn't
+                // be rendered with $elemMatch, we'll have to add it in.
+                case ExpressionType.Equal:
+                case ExpressionType.GreaterThan:
+                case ExpressionType.GreaterThanOrEqual:
+                case ExpressionType.LessThan:
+                case ExpressionType.LessThanOrEqual:
+                case ExpressionType.NotEqual:
+                    return true;
+                case ExpressionType.Call:
+                    var callNode = (MethodCallExpression)node;
+                    switch (callNode.Method.Name)
                     {
-                        filter = new ScalarElementMatchFilterDefinition<BsonDocument>(filter);
+                        case "Contains":
+                        case "StartsWith":
+                        case "EndsWith":
+                            return true;
+                        default:
+                            return false;
+                    }
+                case ExpressionType.Convert:
+                case ExpressionType.ConvertChecked:
+                case ExpressionType.Not:
+                    var unaryExpression = (UnaryExpression)node;
+                    return CanAnyBeRenderedWithoutElemMatch(unaryExpression.Operand);
+                case ExpressionType.Extension:
+                    var pipelineExpression = node as PipelineExpression;
+                    if (pipelineExpression != null)
+                    {
+                        var source = pipelineExpression.Source as ISerializationExpression;
+                        return source == null;
                     }
 
-                    return filter;
-                }
+                    return false;
+                default:
+                    return false;
             }
-            return null;
         }
 
-        /// <summary>
-        /// Builds the array length query.
-        /// </summary>
-        /// <param name="variableExpression">The variable expression.</param>
-        /// <param name="operatorType">Type of the operator.</param>
-        /// <param name="constantExpression">The constant expression.</param>
-        /// <returns></returns>
-        private FilterDefinition<BsonDocument> BuildArrayLengthQuery(Expression variableExpression, ExpressionType operatorType, ConstantExpression constantExpression)
+        private FilterDefinition<BsonDocument> TranslateArrayLength(Expression variableNode, ExpressionType operatorType, ConstantExpression constantNode)
         {
             var allowedOperators = new[]
             {
@@ -194,59 +211,97 @@ namespace MongoDB.Driver.Linq.Translators
                 return null;
             }
 
-            if (constantExpression.Type != typeof(int))
+            if (constantNode.Type != typeof(int))
             {
                 return null;
             }
-            var value = ToInt32(constantExpression);
+            var value = ToInt32(constantNode);
 
-            BsonSerializationInfo serializationInfo = null;
+            IFieldExpression fieldExpression = null;
 
-            var unaryExpression = variableExpression as UnaryExpression;
+            var unaryExpression = variableNode as UnaryExpression;
             if (unaryExpression != null && unaryExpression.NodeType == ExpressionType.ArrayLength)
             {
-                TryGetSerializationInfo(unaryExpression.Operand, out serializationInfo);
+                TryGetFieldExpression(unaryExpression.Operand, out fieldExpression);
             }
 
-            var memberExpression = variableExpression as MemberExpression;
+            var memberExpression = variableNode as MemberExpression;
             if (memberExpression != null && memberExpression.Member.Name == "Count")
             {
-                TryGetSerializationInfo(memberExpression.Expression, out serializationInfo);
+                TryGetFieldExpression(memberExpression.Expression, out fieldExpression);
             }
 
-            var methodCallExpression = variableExpression as MethodCallExpression;
-            if (methodCallExpression != null && methodCallExpression.Method.Name == "Count" && methodCallExpression.Method.DeclaringType == typeof(Enumerable))
+            var pipelineExpression = variableNode as PipelineExpression;
+            if (pipelineExpression != null && pipelineExpression.ResultOperator != null && pipelineExpression.ResultOperator is CountResultOperator)
             {
-                var arguments = methodCallExpression.Arguments.ToArray();
-                if (arguments.Length == 1 && methodCallExpression.Arguments[0].Type != typeof(string))
-                {
-                    TryGetSerializationInfo(methodCallExpression.Arguments[0], out serializationInfo);
-                }
+                TryGetFieldExpression(pipelineExpression.Source, out fieldExpression);
             }
 
-            if (serializationInfo != null)
+            if (fieldExpression != null)
             {
                 switch (operatorType)
                 {
                     case ExpressionType.Equal:
-                        return __builder.Size(serializationInfo.ElementName, value);
+                        return __builder.Size(fieldExpression.FieldName, value);
                     case ExpressionType.NotEqual:
-                        return __builder.Not(__builder.Size(serializationInfo.ElementName, value));
+                        return __builder.Not(__builder.Size(fieldExpression.FieldName, value));
                     case ExpressionType.GreaterThan:
-                        return __builder.SizeGt(serializationInfo.ElementName, value);
+                        return __builder.SizeGt(fieldExpression.FieldName, value);
                     case ExpressionType.GreaterThanOrEqual:
-                        return __builder.SizeGte(serializationInfo.ElementName, value);
+                        return __builder.SizeGte(fieldExpression.FieldName, value);
                     case ExpressionType.LessThan:
-                        return __builder.SizeLt(serializationInfo.ElementName, value);
+                        return __builder.SizeLt(fieldExpression.FieldName, value);
                     case ExpressionType.LessThanOrEqual:
-                        return __builder.SizeLte(serializationInfo.ElementName, value);
+                        return __builder.SizeLte(fieldExpression.FieldName, value);
                 }
             }
 
             return null;
         }
 
-        private FilterDefinition<BsonDocument> BuildBooleanQuery(bool value)
+        private FilterDefinition<BsonDocument> TranslateBitwiseComparison(Expression variableExpression, ExpressionType operatorType, ConstantExpression constantExpression)
+        {
+            var binaryExpression = variableExpression as BinaryExpression;
+            if (binaryExpression == null ||
+                binaryExpression.NodeType != ExpressionType.And ||
+                binaryExpression.Right.NodeType != ExpressionType.Constant ||
+                (operatorType != ExpressionType.Equal && operatorType != ExpressionType.NotEqual))
+            {
+                return null;
+            }
+
+            var field = GetFieldExpression(binaryExpression.Left);
+
+            var value = field.SerializeValue(((ConstantExpression)binaryExpression.Right).Value).ToInt64();
+            var comparison = Convert.ToInt64(constantExpression.Value);
+
+            if (value == comparison)
+            {
+                if (operatorType == ExpressionType.Equal)
+                {
+                    return __builder.BitsAllSet(field.FieldName, value);
+                }
+                else
+                {
+                    return __builder.BitsAnyClear(field.FieldName, value);
+                }
+            }
+            else if (comparison == 0)
+            {
+                if (operatorType == ExpressionType.Equal)
+                {
+                    return __builder.BitsAllClear(field.FieldName, value);
+                }
+                else
+                {
+                    return __builder.BitsAnySet(field.FieldName, value);
+                }
+            }
+
+            return null;
+        }
+
+        private FilterDefinition<BsonDocument> TranslateBoolean(bool value)
         {
             if (value)
             {
@@ -258,23 +313,23 @@ namespace MongoDB.Driver.Linq.Translators
             }
         }
 
-        private FilterDefinition<BsonDocument> BuildBooleanQuery(Expression expression)
+        private FilterDefinition<BsonDocument> TranslateBoolean(Expression expression)
         {
             if (expression.Type == typeof(bool))
             {
                 var constantExpression = expression as ConstantExpression;
                 if (constantExpression != null)
                 {
-                    return BuildBooleanQuery((bool)constantExpression.Value);
+                    return TranslateBoolean((bool)constantExpression.Value);
                 }
 
-                var serializationInfo = GetSerializationInfo(expression);
-                return new BsonDocument(serializationInfo.ElementName, true);
+                var fieldExpression = GetFieldExpression(expression);
+                return new BsonDocument(fieldExpression.FieldName, true);
             }
             return null;
         }
 
-        private FilterDefinition<BsonDocument> BuildComparisonQuery(BinaryExpression binaryExpression)
+        private FilterDefinition<BsonDocument> TranslateComparison(BinaryExpression binaryExpression)
         {
             // the constant could be on either side
             var variableExpression = binaryExpression.Left;
@@ -286,137 +341,128 @@ namespace MongoDB.Driver.Linq.Translators
                 return null;
             }
 
-            var query = BuildArrayLengthQuery(variableExpression, operatorType, constantExpression);
+            var query = TranslateArrayLength(variableExpression, operatorType, constantExpression);
             if (query != null)
             {
                 return query;
             }
 
-            query = BuildModQuery(variableExpression, operatorType, constantExpression);
+            query = TranslateMod(variableExpression, operatorType, constantExpression);
             if (query != null)
             {
                 return query;
             }
 
-            query = BuildStringIndexOfQuery(variableExpression, operatorType, constantExpression);
+            query = TranslateCompareTo(variableExpression, operatorType, constantExpression);
             if (query != null)
             {
                 return query;
             }
 
-            query = BuildStringIndexQuery(variableExpression, operatorType, constantExpression);
+            query = TranslateStringIndexOfQuery(variableExpression, operatorType, constantExpression);
             if (query != null)
             {
                 return query;
             }
 
-            query = BuildStringLengthQuery(variableExpression, operatorType, constantExpression);
+            query = TranslateStringIndexQuery(variableExpression, operatorType, constantExpression);
             if (query != null)
             {
                 return query;
             }
 
-            query = BuildStringCaseInsensitiveComparisonQuery(variableExpression, operatorType, constantExpression);
+            query = TranslateStringLengthQuery(variableExpression, operatorType, constantExpression);
             if (query != null)
             {
                 return query;
             }
 
-            query = BuildTypeComparisonQuery(variableExpression, operatorType, constantExpression);
+            query = TranslateStringCaseInsensitiveComparisonQuery(variableExpression, operatorType, constantExpression);
             if (query != null)
             {
                 return query;
             }
 
-            return BuildComparisonQuery(variableExpression, operatorType, constantExpression);
+            query = TranslateTypeComparisonQuery(variableExpression, operatorType, constantExpression);
+            if (query != null)
+            {
+                return query;
+            }
+
+            query = TranslateBitwiseComparison(variableExpression, operatorType, constantExpression);
+            if (query != null)
+            {
+                return query;
+            }
+
+            return TranslateComparison(variableExpression, operatorType, constantExpression);
         }
 
-        private FilterDefinition<BsonDocument> BuildComparisonQuery(Expression variableExpression, ExpressionType operatorType, ConstantExpression constantExpression)
+        private FilterDefinition<BsonDocument> TranslateCompareTo(Expression variableExpression, ExpressionType operatorType, ConstantExpression constantExpression)
         {
-            BsonSerializationInfo serializationInfo = null;
+            if (constantExpression.Type != typeof(int) || ((int)constantExpression.Value) != 0)
+            {
+                return null;
+            }
+
+            var call = variableExpression as MethodCallExpression;
+            if (call == null || call.Object == null || call.Method.Name != "CompareTo" || call.Arguments.Count != 1)
+            {
+                return null;
+            }
+
+            constantExpression = call.Arguments[0] as ConstantExpression;
+            if (constantExpression == null)
+            {
+                return null;
+            }
+
+            return TranslateComparison(call.Object, operatorType, constantExpression);
+        }
+
+        private FilterDefinition<BsonDocument> TranslateComparison(Expression variableExpression, ExpressionType operatorType, ConstantExpression constantExpression)
+        {
             var value = constantExpression.Value;
 
-            var unaryExpression = variableExpression as UnaryExpression;
-            if (unaryExpression != null && (unaryExpression.NodeType == ExpressionType.Convert || unaryExpression.NodeType == ExpressionType.ConvertChecked))
+            var methodCallExpression = variableExpression as MethodCallExpression;
+            if (methodCallExpression != null && value is bool)
             {
-                if (unaryExpression.Operand.Type.IsEnum)
-                {
-                    var enumType = unaryExpression.Operand.Type;
-                    if (unaryExpression.Type == Enum.GetUnderlyingType(enumType))
-                    {
-                        serializationInfo = GetSerializationInfo(unaryExpression.Operand);
-                        value = Enum.ToObject(enumType, value); // serialize enum instead of underlying integer
-                    }
-                }
-                else if (
-                    unaryExpression.Type.IsGenericType &&
-                    unaryExpression.Type.GetGenericTypeDefinition() == typeof(Nullable<>) &&
-                    unaryExpression.Operand.Type.IsGenericType &&
-                    unaryExpression.Operand.Type.GetGenericTypeDefinition() == typeof(Nullable<>) &&
-                    unaryExpression.Operand.Type.GetGenericArguments()[0].IsEnum)
-                {
-                    var enumType = unaryExpression.Operand.Type.GetGenericArguments()[0];
-                    if (unaryExpression.Type.GetGenericArguments()[0] == Enum.GetUnderlyingType(enumType))
-                    {
-                        serializationInfo = GetSerializationInfo(unaryExpression.Operand);
-                        if (value != null)
-                        {
-                            value = Enum.ToObject(enumType, value); // serialize enum instead of underlying integer
-                        }
-                    }
-                }
-                else
-                {
-                    //Allows a cast, which would be required for compilation, such as (float){object} >= 25f to be built as __builder.GTE({object}, 25)
-                    serializationInfo = GetSerializationInfo(unaryExpression.Operand);
-                }
-            }
-            else
-            {
-                var methodCallExpression = variableExpression as MethodCallExpression;
-                if (methodCallExpression != null && value is bool)
-                {
-                    var boolValue = (bool)value;
-                    var query = this.BuildMethodCallQuery(methodCallExpression);
+                var boolValue = (bool)value;
+                var query = this.TranslateMethodCall(methodCallExpression);
 
-                    var isTrueComparison = (boolValue && operatorType == ExpressionType.Equal)
-                                            || (!boolValue && operatorType == ExpressionType.NotEqual);
+                var isTrueComparison = (boolValue && operatorType == ExpressionType.Equal)
+                                        || (!boolValue && operatorType == ExpressionType.NotEqual);
 
-                    return isTrueComparison ? query : __builder.Not(query);
-                }
-
-                serializationInfo = GetSerializationInfo(variableExpression);
+                return isTrueComparison ? query : __builder.Not(query);
             }
 
-            if (serializationInfo != null)
+            var fieldExpression = GetFieldExpression(variableExpression);
+            var serializedValue = fieldExpression.SerializeValue(value);
+            switch (operatorType)
             {
-                var serializedValue = serializationInfo.SerializeValue(value);
-                switch (operatorType)
-                {
-                    case ExpressionType.Equal: return __builder.Eq(serializationInfo.ElementName, serializedValue);
-                    case ExpressionType.GreaterThan: return __builder.Gt(serializationInfo.ElementName, serializedValue);
-                    case ExpressionType.GreaterThanOrEqual: return __builder.Gte(serializationInfo.ElementName, serializedValue);
-                    case ExpressionType.LessThan: return __builder.Lt(serializationInfo.ElementName, serializedValue);
-                    case ExpressionType.LessThanOrEqual: return __builder.Lte(serializationInfo.ElementName, serializedValue);
-                    case ExpressionType.NotEqual: return __builder.Ne(serializationInfo.ElementName, serializedValue);
-                }
+                case ExpressionType.Equal: return __builder.Eq(fieldExpression.FieldName, serializedValue);
+                case ExpressionType.GreaterThan: return __builder.Gt(fieldExpression.FieldName, serializedValue);
+                case ExpressionType.GreaterThanOrEqual: return __builder.Gte(fieldExpression.FieldName, serializedValue);
+                case ExpressionType.LessThan: return __builder.Lt(fieldExpression.FieldName, serializedValue);
+                case ExpressionType.LessThanOrEqual: return __builder.Lte(fieldExpression.FieldName, serializedValue);
+                case ExpressionType.NotEqual: return __builder.Ne(fieldExpression.FieldName, serializedValue);
             }
 
             return null;
         }
 
-        private FilterDefinition<BsonDocument> BuildConstantQuery(ConstantExpression constantExpression)
+        private FilterDefinition<BsonDocument> TranslateConstant(ConstantExpression constantExpression)
         {
             var value = constantExpression.Value;
             if (value != null && value.GetType() == typeof(bool))
             {
-                return BuildBooleanQuery((bool)value);
+                return TranslateBoolean((bool)value);
             }
 
             return null;
         }
 
-        private FilterDefinition<BsonDocument> BuildContainsKeyQuery(MethodCallExpression methodCallExpression)
+        private FilterDefinition<BsonDocument> TranslateContainsKey(MethodCallExpression methodCallExpression)
         {
             var dictionaryType = methodCallExpression.Object.Type;
             var implementedInterfaces = new List<Type>(dictionaryType.GetInterfaces());
@@ -460,8 +506,8 @@ namespace MongoDB.Driver.Linq.Translators
             }
             var key = constantExpression.Value;
 
-            var serializationInfo = GetSerializationInfo(methodCallExpression.Object);
-            var serializer = serializationInfo.Serializer;
+            var fieldExpression = GetFieldExpression(methodCallExpression.Object);
+            var serializer = fieldExpression.Serializer;
 
             var dictionarySerializer = serializer as IBsonDictionarySerializer;
             if (dictionarySerializer == null)
@@ -483,9 +529,9 @@ namespace MongoDB.Driver.Linq.Translators
             switch (dictionaryRepresentation)
             {
                 case DictionaryRepresentation.ArrayOfDocuments:
-                    return __builder.Eq(serializationInfo.ElementName + ".k", serializedKey);
+                    return __builder.Eq(fieldExpression.FieldName + ".k", serializedKey);
                 case DictionaryRepresentation.Document:
-                    return __builder.Exists(serializationInfo.ElementName + "." + serializedKey.AsString);
+                    return __builder.Exists(fieldExpression.FieldName + "." + serializedKey.AsString);
                 default:
                     var message = string.Format(
                         "{0} in a LINQ query is only supported for DictionaryRepresentation ArrayOfDocuments or Document, not {1}.",
@@ -495,59 +541,23 @@ namespace MongoDB.Driver.Linq.Translators
             }
         }
 
-        private FilterDefinition<BsonDocument> BuildContainsQuery(MethodCallExpression methodCallExpression)
+        private FilterDefinition<BsonDocument> TranslateContains(MethodCallExpression methodCallExpression)
         {
             // handle IDictionary Contains the same way as IDictionary<TKey, TValue> ContainsKey
             if (methodCallExpression.Object != null && typeof(IDictionary).IsAssignableFrom(methodCallExpression.Object.Type))
             {
-                return BuildContainsKeyQuery(methodCallExpression);
+                return TranslateContainsKey(methodCallExpression);
             }
 
             if (methodCallExpression.Method.DeclaringType == typeof(string))
             {
-                return BuildStringQuery(methodCallExpression);
-            }
-
-            if (methodCallExpression.Object != null && methodCallExpression.Object.NodeType == ExpressionType.Constant)
-            {
-                return BuildInQuery(methodCallExpression);
-            }
-
-            BsonSerializationInfo serializationInfo = null;
-            ConstantExpression valueExpression = null;
-            var arguments = methodCallExpression.Arguments.ToArray();
-            if (arguments.Length == 1)
-            {
-                if (typeof(IEnumerable).IsAssignableFrom(methodCallExpression.Method.DeclaringType))
-                {
-                    serializationInfo = GetSerializationInfo(methodCallExpression.Object);
-                    valueExpression = arguments[0] as ConstantExpression;
-                }
-            }
-            else if (arguments.Length == 2)
-            {
-                if (methodCallExpression.Method.DeclaringType == typeof(Enumerable))
-                {
-                    if (arguments[0].NodeType == ExpressionType.Constant)
-                    {
-                        return BuildInQuery(methodCallExpression);
-                    }
-                    serializationInfo = GetSerializationInfo(arguments[0]);
-                    valueExpression = arguments[1] as ConstantExpression;
-                }
-            }
-
-            if (serializationInfo != null && valueExpression != null)
-            {
-                var itemSerializationInfo = GetItemSerializationInfo("Contains", serializationInfo);
-                var serializedValue = itemSerializationInfo.SerializeValue(valueExpression.Value);
-                return __builder.Eq(serializationInfo.ElementName, serializedValue);
+                return TranslateStringQuery(methodCallExpression);
             }
 
             return null;
         }
 
-        private FilterDefinition<BsonDocument> BuildEqualsQuery(MethodCallExpression methodCallExpression)
+        private FilterDefinition<BsonDocument> TranslateEquals(MethodCallExpression methodCallExpression)
         {
             var arguments = methodCallExpression.Arguments.ToArray();
 
@@ -591,26 +601,39 @@ namespace MongoDB.Driver.Linq.Translators
 
                 if (variableExpression.Type == typeof(Type) && constantExpression.Type == typeof(Type))
                 {
-                    return BuildTypeComparisonQuery(variableExpression, ExpressionType.Equal, constantExpression);
+                    return TranslateTypeComparisonQuery(variableExpression, ExpressionType.Equal, constantExpression);
                 }
 
-                return BuildComparisonQuery(variableExpression, ExpressionType.Equal, constantExpression);
+                return TranslateComparison(variableExpression, ExpressionType.Equal, constantExpression);
             }
 
             return null;
         }
 
-        private FilterDefinition<BsonDocument> BuildInQuery(MethodCallExpression methodCallExpression)
+        private FilterDefinition<BsonDocument> TranslateHasFlag(MethodCallExpression methodCallExpression)
+        {
+            if (methodCallExpression.Object == null)
+            {
+                return null;
+            }
+
+            var field = GetFieldExpression(methodCallExpression.Object);
+            var value = field.SerializeValue(((ConstantExpression)methodCallExpression.Arguments[0]).Value).ToInt64();
+
+            return __builder.BitsAllSet(field.FieldName, value);
+        }
+
+        private FilterDefinition<BsonDocument> TranslateIn(MethodCallExpression methodCallExpression)
         {
             var methodDeclaringType = methodCallExpression.Method.DeclaringType;
             var arguments = methodCallExpression.Arguments.ToArray();
-            BsonSerializationInfo serializationInfo = null;
+            IFieldExpression fieldExpression = null;
             ConstantExpression valuesExpression = null;
             if (methodDeclaringType == typeof(Enumerable) || methodDeclaringType == typeof(Queryable))
             {
                 if (arguments.Length == 2)
                 {
-                    serializationInfo = GetSerializationInfo(arguments[1]);
+                    fieldExpression = GetFieldExpression(arguments[1]);
                     valuesExpression = arguments[0] as ConstantExpression;
                 }
             }
@@ -624,20 +647,20 @@ namespace MongoDB.Driver.Linq.Translators
                 bool contains = methodDeclaringType == typeof(ICollection<>) || methodDeclaringType.GetInterface("ICollection`1") != null;
                 if (contains && arguments.Length == 1)
                 {
-                    serializationInfo = GetSerializationInfo(arguments[0]);
+                    fieldExpression = GetFieldExpression(arguments[0]);
                     valuesExpression = methodCallExpression.Object as ConstantExpression;
                 }
             }
 
-            if (serializationInfo != null && valuesExpression != null)
+            if (fieldExpression != null && valuesExpression != null)
             {
-                var serializedValues = serializationInfo.SerializeValues((IEnumerable)valuesExpression.Value);
-                return __builder.In(serializationInfo.ElementName, serializedValues);
+                var serializedValues = fieldExpression.SerializeValues((IEnumerable)valuesExpression.Value);
+                return __builder.In(fieldExpression.FieldName, serializedValues);
             }
             return null;
         }
 
-        private FilterDefinition<BsonDocument> BuildIsMatchQuery(MethodCallExpression methodCallExpression)
+        private FilterDefinition<BsonDocument> TranslateIsMatch(MethodCallExpression methodCallExpression)
         {
             if (methodCallExpression.Method.DeclaringType == typeof(Regex))
             {
@@ -647,7 +670,7 @@ namespace MongoDB.Driver.Linq.Translators
                 {
                     if (arguments.Length == 2 || arguments.Length == 3)
                     {
-                        var serializationInfo = GetSerializationInfo(arguments[0]);
+                        var fieldExpression = GetFieldExpression(arguments[0]);
                         var patternExpression = arguments[1] as ConstantExpression;
                         if (patternExpression != null)
                         {
@@ -665,7 +688,7 @@ namespace MongoDB.Driver.Linq.Translators
                                     options = (RegexOptions)optionsExpression.Value;
                                 }
                                 var regex = new Regex(pattern, options);
-                                return __builder.Regex(serializationInfo.ElementName, regex);
+                                return __builder.Regex(fieldExpression.FieldName, regex);
                             }
                         }
                     }
@@ -675,11 +698,11 @@ namespace MongoDB.Driver.Linq.Translators
                     var regexExpression = obj as ConstantExpression;
                     if (regexExpression != null && arguments.Length == 1)
                     {
-                        var serializationInfo = GetSerializationInfo(arguments[0]);
+                        var serializationInfo = GetFieldExpression(arguments[0]);
                         var regex = regexExpression.Value as Regex;
                         if (regex != null)
                         {
-                            return __builder.Regex(serializationInfo.ElementName, regex);
+                            return __builder.Regex(serializationInfo.FieldName, regex);
                         }
                     }
                 }
@@ -687,41 +710,37 @@ namespace MongoDB.Driver.Linq.Translators
             return null;
         }
 
-        private FilterDefinition<BsonDocument> BuildIsNullOrEmptyQuery(MethodCallExpression methodCallExpression)
+        private FilterDefinition<BsonDocument> TranslateIsNullOrEmpty(MethodCallExpression methodCallExpression)
         {
             if (methodCallExpression.Method.DeclaringType == typeof(string) && methodCallExpression.Object == null)
             {
                 var arguments = methodCallExpression.Arguments.ToArray();
-                if (arguments.Length == 1)
-                {
-                    var serializationInfo = GetSerializationInfo(arguments[0]);
-                    return __builder.Or(
-                        __builder.Type(serializationInfo.ElementName, BsonType.Null), // this is the safe way to test for null
-                        __builder.Eq(serializationInfo.ElementName, ""));
-                }
+                var fieldExpression = GetFieldExpression(arguments[0]);
+                return __builder.In<string>(fieldExpression.FieldName, new string[] { null, "" });
             }
 
             return null;
         }
 
-        private FilterDefinition<BsonDocument> BuildMethodCallQuery(MethodCallExpression methodCallExpression)
+        private FilterDefinition<BsonDocument> TranslateMethodCall(MethodCallExpression methodCallExpression)
         {
             switch (methodCallExpression.Method.Name)
             {
-                case "Any": return BuildAnyQuery(methodCallExpression);
-                case "Contains": return BuildContainsQuery(methodCallExpression);
-                case "ContainsKey": return BuildContainsKeyQuery(methodCallExpression);
-                case "EndsWith": return BuildStringQuery(methodCallExpression);
-                case "Equals": return BuildEqualsQuery(methodCallExpression);
-                case "In": return BuildInQuery(methodCallExpression);
-                case "IsMatch": return BuildIsMatchQuery(methodCallExpression);
-                case "IsNullOrEmpty": return BuildIsNullOrEmptyQuery(methodCallExpression);
-                case "StartsWith": return BuildStringQuery(methodCallExpression);
+                case "Contains": return TranslateContains(methodCallExpression);
+                case "ContainsKey": return TranslateContainsKey(methodCallExpression);
+                case "EndsWith": return TranslateStringQuery(methodCallExpression);
+                case "Equals": return TranslateEquals(methodCallExpression);
+                case "HasFlag": return TranslateHasFlag(methodCallExpression);
+                case "In": return TranslateIn(methodCallExpression);
+                case "IsMatch": return TranslateIsMatch(methodCallExpression);
+                case "IsNullOrEmpty": return TranslateIsNullOrEmpty(methodCallExpression);
+                case "StartsWith": return TranslateStringQuery(methodCallExpression);
             }
+
             return null;
         }
 
-        private FilterDefinition<BsonDocument> BuildModQuery(Expression variableExpression, ExpressionType operatorType, ConstantExpression constantExpression)
+        private FilterDefinition<BsonDocument> TranslateMod(Expression variableExpression, ExpressionType operatorType, ConstantExpression constantExpression)
         {
             if (operatorType != ExpressionType.Equal && operatorType != ExpressionType.NotEqual)
             {
@@ -737,18 +756,18 @@ namespace MongoDB.Driver.Linq.Translators
             var modBinaryExpression = variableExpression as BinaryExpression;
             if (modBinaryExpression != null && modBinaryExpression.NodeType == ExpressionType.Modulo)
             {
-                var serializationInfo = GetSerializationInfo(modBinaryExpression.Left);
+                var fieldExpression = GetFieldExpression(modBinaryExpression.Left);
                 var modulusExpression = modBinaryExpression.Right as ConstantExpression;
                 if (modulusExpression != null)
                 {
                     var modulus = ToInt64(modulusExpression);
                     if (operatorType == ExpressionType.Equal)
                     {
-                        return __builder.Mod(serializationInfo.ElementName, modulus, value);
+                        return __builder.Mod(fieldExpression.FieldName, modulus, value);
                     }
                     else
                     {
-                        return __builder.Not(__builder.Mod(serializationInfo.ElementName, modulus, value));
+                        return __builder.Not(__builder.Mod(fieldExpression.FieldName, modulus, value));
                     }
                 }
             }
@@ -756,28 +775,211 @@ namespace MongoDB.Driver.Linq.Translators
             return null;
         }
 
-        private FilterDefinition<BsonDocument> BuildNotQuery(UnaryExpression unaryExpression)
+        private FilterDefinition<BsonDocument> TranslateNot(UnaryExpression unaryExpression)
         {
-            var filter = BuildFilter(unaryExpression.Operand);
+            var filter = Translate(unaryExpression.Operand);
             return __builder.Not(filter);
         }
 
-        private FilterDefinition<BsonDocument> BuildOrElseQuery(BinaryExpression binaryExpression)
+        private FilterDefinition<BsonDocument> TranslateOrElse(BinaryExpression binaryExpression)
         {
-            return __builder.Or(BuildFilter(binaryExpression.Left), BuildFilter(binaryExpression.Right));
+            return __builder.Or(Translate(binaryExpression.Left), Translate(binaryExpression.Right));
         }
 
-        private FilterDefinition<BsonDocument> BuildOrQuery(BinaryExpression binaryExpression)
+        private FilterDefinition<BsonDocument> TranslateOr(BinaryExpression binaryExpression)
         {
             if (binaryExpression.Left.Type == typeof(bool) && binaryExpression.Right.Type == typeof(bool))
             {
-                return BuildOrElseQuery(binaryExpression);
+                return TranslateOrElse(binaryExpression);
             }
 
             return null;
         }
 
-        private FilterDefinition<BsonDocument> BuildStringIndexOfQuery(Expression variableExpression, ExpressionType operatorType, ConstantExpression constantExpression)
+
+        private FilterDefinition<BsonDocument> TranslatePipeline(PipelineExpression node)
+        {
+            if (node.ResultOperator is AllResultOperator)
+            {
+                return TranslatePipelineAll(node);
+            }
+            if (node.ResultOperator is AnyResultOperator)
+            {
+                return TranslatePipelineAny(node);
+            }
+            if (node.ResultOperator is ContainsResultOperator)
+            {
+                return TranslatePipelineContains(node);
+            }
+
+            return null;
+        }
+
+        private FilterDefinition<BsonDocument> TranslatePipelineAll(PipelineExpression node)
+        {
+            var whereExpression = node.Source as WhereExpression;
+            if (whereExpression == null)
+            {
+                return null;
+            }
+
+            var constant = whereExpression.Source as ConstantExpression;
+            if (constant == null)
+            {
+                return null;
+            }
+
+            var embeddedPipeline = whereExpression.Predicate as PipelineExpression;
+            if (!(embeddedPipeline?.ResultOperator is ContainsResultOperator))
+            {
+                return null;
+            }
+
+            var fieldExpression = embeddedPipeline.Source as IFieldExpression;
+            if (fieldExpression == null)
+            {
+                return null;
+            }
+
+            var arraySerializer = fieldExpression.Serializer as IBsonArraySerializer;
+            if (arraySerializer == null)
+            {
+                return null;
+            }
+
+            BsonSerializationInfo itemSerializationInfo;
+            if (!arraySerializer.TryGetItemSerializationInfo(out itemSerializationInfo))
+            {
+                return null;
+            }
+
+            var serializedValues = itemSerializationInfo.SerializeValues((IEnumerable)constant.Value);
+            return __builder.All(fieldExpression.FieldName, serializedValues);
+        }
+
+        private FilterDefinition<BsonDocument> TranslatePipelineAny(PipelineExpression node)
+        {
+            var fieldExpression = node.Source as IFieldExpression;
+            if (fieldExpression != null)
+            {
+                return __builder.And(
+                        __builder.Ne(fieldExpression.FieldName, BsonNull.Value),
+                        __builder.Not(__builder.Size(fieldExpression.FieldName, 0)));
+            }
+
+            var whereExpression = node.Source as WhereExpression;
+            if (whereExpression == null)
+            {
+                return null;
+            }
+
+            fieldExpression = whereExpression.Source as IFieldExpression;
+            if (fieldExpression == null)
+            {
+                if (whereExpression.Source is ConstantExpression)
+                {
+                    return TranslatePipelineAnyScalar(node);
+                }
+                return null;
+            }
+
+            FilterDefinition<BsonDocument> filter;
+            var renderWithoutElemMatch = CanAnyBeRenderedWithoutElemMatch(whereExpression.Predicate);
+
+            if (renderWithoutElemMatch)
+            {
+                var predicate = FieldNamePrefixer.Prefix(whereExpression.Predicate, fieldExpression.FieldName);
+                filter = Translate(predicate);
+            }
+            else
+            {
+                var predicate = DocumentToFieldConverter.Convert(whereExpression.Predicate);
+                filter = __builder.ElemMatch(fieldExpression.FieldName, Translate(predicate));
+                if (!(fieldExpression.Serializer is IBsonDocumentSerializer))
+                {
+                    filter = new ScalarElementMatchFilterDefinition<BsonDocument>(filter);
+                }
+            }
+
+            return filter;
+        }
+
+        private FilterDefinition<BsonDocument> TranslatePipelineAnyScalar(PipelineExpression node)
+        {
+            var whereExpression = node.Source as WhereExpression;
+            if (whereExpression == null)
+            {
+                return null;
+            }
+
+            var constant = whereExpression.Source as ConstantExpression;
+            if (constant == null)
+            {
+                return null;
+            }
+
+            var embeddedPipeline = whereExpression.Predicate as PipelineExpression;
+            if (!(embeddedPipeline?.ResultOperator is ContainsResultOperator))
+            {
+                return null;
+            }
+
+            var fieldExpression = embeddedPipeline.Source as IFieldExpression;
+            if (fieldExpression == null)
+            {
+                return null;
+            }
+
+            var arraySerializer = fieldExpression.Serializer as IBsonArraySerializer;
+            if (arraySerializer == null)
+            {
+                return null;
+            }
+
+            BsonSerializationInfo itemSerializationInfo;
+            if (!arraySerializer.TryGetItemSerializationInfo(out itemSerializationInfo))
+            {
+                return null;
+            }
+
+            var serializedValues = itemSerializationInfo.SerializeValues((IEnumerable)constant.Value);
+            return __builder.In(fieldExpression.FieldName, serializedValues);
+        }
+
+        private FilterDefinition<BsonDocument> TranslatePipelineContains(PipelineExpression node)
+        {
+            var value = ((ContainsResultOperator)node.ResultOperator).Value;
+            var constant = node.Source as ConstantExpression;
+            IFieldExpression field;
+            if (constant != null)
+            {
+                field = value as IFieldExpression;
+                if (field != null)
+                {
+                    var serializedValues = field.SerializeValues((IEnumerable)constant.Value);
+                    return __builder.In(field.FieldName, serializedValues);
+                }
+            }
+            else
+            {
+                constant = value as ConstantExpression;
+                field = node.Source as IFieldExpression;
+                if (constant != null && field != null)
+                {
+                    var arraySerializer = field.Serializer as IBsonArraySerializer;
+                    BsonSerializationInfo itemSerializationInfo;
+                    if (arraySerializer != null && arraySerializer.TryGetItemSerializationInfo(out itemSerializationInfo))
+                    {
+                        var serializedValue = itemSerializationInfo.SerializeValue(constant.Value);
+                        return __builder.Eq(field.FieldName, serializedValue);
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private FilterDefinition<BsonDocument> TranslateStringIndexOfQuery(Expression variableExpression, ExpressionType operatorType, ConstantExpression constantExpression)
         {
             // TODO: support other comparison operators
             if (operatorType != ExpressionType.Equal)
@@ -796,7 +998,7 @@ namespace MongoDB.Driver.Linq.Translators
                 (methodCallExpression.Method.Name == "IndexOf" || methodCallExpression.Method.Name == "IndexOfAny") &&
                 methodCallExpression.Method.DeclaringType == typeof(string))
             {
-                var serializationInfo = GetSerializationInfo(methodCallExpression.Object);
+                var fieldExpression = GetFieldExpression(methodCallExpression.Object);
 
                 object value;
                 var startIndex = -1;
@@ -871,7 +1073,7 @@ namespace MongoDB.Driver.Linq.Translators
                             if (index >= startIndex + count)
                             {
                                 // index is outside of the substring so no match is possible
-                                return BuildBooleanQuery(false);
+                                return TranslateBoolean(false);
                             }
                             else
                             {
@@ -905,7 +1107,7 @@ namespace MongoDB.Driver.Linq.Translators
                             if (unescapedLength > startIndex + count - index)
                             {
                                 // substring isn't long enough to match
-                                return BuildBooleanQuery(false);
+                                return TranslateBoolean(false);
                             }
                             else
                             {
@@ -919,14 +1121,14 @@ namespace MongoDB.Driver.Linq.Translators
 
                 if (pattern != null)
                 {
-                    return __builder.Regex(serializationInfo.ElementName, new BsonRegularExpression(pattern, "s"));
+                    return __builder.Regex(fieldExpression.FieldName, new BsonRegularExpression(pattern, "s"));
                 }
             }
 
             return null;
         }
 
-        private FilterDefinition<BsonDocument> BuildStringIndexQuery(Expression variableExpression, ExpressionType operatorType, ConstantExpression constantExpression)
+        private FilterDefinition<BsonDocument> TranslateStringIndexQuery(Expression variableExpression, ExpressionType operatorType, ConstantExpression constantExpression)
         {
             var unaryExpression = variableExpression as UnaryExpression;
             if (unaryExpression == null)
@@ -995,11 +1197,11 @@ namespace MongoDB.Driver.Linq.Translators
             }
             var pattern = string.Format("^.{{{0}}}{1}", index, characterClass);
 
-            var serializationInfo = GetSerializationInfo(stringExpression);
-            return __builder.Regex(serializationInfo.ElementName, new BsonRegularExpression(pattern, "s"));
+            var fieldExpression = GetFieldExpression(stringExpression);
+            return __builder.Regex(fieldExpression.FieldName, new BsonRegularExpression(pattern, "s"));
         }
 
-        private FilterDefinition<BsonDocument> BuildStringLengthQuery(Expression variableExpression, ExpressionType operatorType, ConstantExpression constantExpression)
+        private FilterDefinition<BsonDocument> TranslateStringLengthQuery(Expression variableExpression, ExpressionType operatorType, ConstantExpression constantExpression)
         {
             if (constantExpression.Type != typeof(int))
             {
@@ -1007,12 +1209,12 @@ namespace MongoDB.Driver.Linq.Translators
             }
             var value = ToInt32(constantExpression);
 
-            BsonSerializationInfo serializationInfo = null;
+            IFieldExpression fieldExpression = null;
 
             var memberExpression = variableExpression as MemberExpression;
             if (memberExpression != null && memberExpression.Member.Name == "Length")
             {
-                TryGetSerializationInfo(memberExpression.Expression, out serializationInfo);
+                TryGetFieldExpression(memberExpression.Expression, out fieldExpression);
             }
 
             var methodCallExpression = variableExpression as MethodCallExpression;
@@ -1021,11 +1223,11 @@ namespace MongoDB.Driver.Linq.Translators
                 var args = methodCallExpression.Arguments.ToArray();
                 if (args.Length == 1 && args[0].Type == typeof(string))
                 {
-                    TryGetSerializationInfo(args[0], out serializationInfo);
+                    TryGetFieldExpression(args[0], out fieldExpression);
                 }
             }
 
-            if (serializationInfo != null)
+            if (fieldExpression != null)
             {
                 string regex = null;
                 switch (operatorType)
@@ -1041,11 +1243,11 @@ namespace MongoDB.Driver.Linq.Translators
                 {
                     if (operatorType == ExpressionType.NotEqual)
                     {
-                        return __builder.Not(__builder.Regex(serializationInfo.ElementName, regex));
+                        return __builder.Not(__builder.Regex(fieldExpression.FieldName, regex));
                     }
                     else
                     {
-                        return __builder.Regex(serializationInfo.ElementName, regex);
+                        return __builder.Regex(fieldExpression.FieldName, regex);
                     }
                 }
             }
@@ -1053,7 +1255,7 @@ namespace MongoDB.Driver.Linq.Translators
             return null;
         }
 
-        private FilterDefinition<BsonDocument> BuildStringCaseInsensitiveComparisonQuery(Expression variableExpression, ExpressionType operatorType, ConstantExpression constantExpression)
+        private FilterDefinition<BsonDocument> TranslateStringCaseInsensitiveComparisonQuery(Expression variableExpression, ExpressionType operatorType, ConstantExpression constantExpression)
         {
             var methodExpression = variableExpression as MethodCallExpression;
             if (methodExpression == null)
@@ -1075,8 +1277,8 @@ namespace MongoDB.Driver.Linq.Translators
                 return null;
             }
 
-            var serializationInfo = GetSerializationInfo(methodExpression.Object);
-            var serializedValue = serializationInfo.SerializeValue(constantExpression.Value);
+            var fieldExpression = GetFieldExpression(methodExpression.Object);
+            var serializedValue = fieldExpression.SerializeValue(constantExpression.Value);
 
             if (serializedValue.IsString)
             {
@@ -1094,11 +1296,11 @@ namespace MongoDB.Driver.Linq.Translators
 
                     if (operatorType == ExpressionType.Equal)
                     {
-                        return __builder.Regex(serializationInfo.ElementName, regex);
+                        return __builder.Regex(fieldExpression.FieldName, regex);
                     }
                     else
                     {
-                        return __builder.Not(__builder.Regex(serializationInfo.ElementName, regex));
+                        return __builder.Not(__builder.Regex(fieldExpression.FieldName, regex));
                     }
                 }
                 else
@@ -1106,12 +1308,12 @@ namespace MongoDB.Driver.Linq.Translators
                     if (operatorType == ExpressionType.Equal)
                     {
                         // == "mismatched case" matches no documents
-                        return BuildBooleanQuery(false);
+                        return TranslateBoolean(false);
                     }
                     else
                     {
                         // != "mismatched case" matches all documents
-                        return BuildBooleanQuery(true);
+                        return TranslateBoolean(true);
                     }
                 }
             }
@@ -1119,11 +1321,11 @@ namespace MongoDB.Driver.Linq.Translators
             {
                 if (operatorType == ExpressionType.Equal)
                 {
-                    return __builder.Eq(serializationInfo.ElementName, BsonNull.Value);
+                    return __builder.Eq(fieldExpression.FieldName, BsonNull.Value);
                 }
                 else
                 {
-                    return __builder.Ne(serializationInfo.ElementName, BsonNull.Value);
+                    return __builder.Ne(fieldExpression.FieldName, BsonNull.Value);
                 }
             }
             else
@@ -1133,7 +1335,7 @@ namespace MongoDB.Driver.Linq.Translators
             }
         }
 
-        private FilterDefinition<BsonDocument> BuildStringQuery(MethodCallExpression methodCallExpression)
+        private FilterDefinition<BsonDocument> TranslateStringQuery(MethodCallExpression methodCallExpression)
         {
             if (methodCallExpression.Method.DeclaringType != typeof(string))
             {
@@ -1225,12 +1427,12 @@ namespace MongoDB.Driver.Linq.Translators
                 pattern = pattern.Substring(0, pattern.Length - 3);
             }
 
-            var serializationInfo = GetSerializationInfo(stringExpression);
+            var fieldExpression = GetFieldExpression(stringExpression);
             var options = caseInsensitive ? "is" : "s";
-            return __builder.Regex(serializationInfo.ElementName, new BsonRegularExpression(pattern, options));
+            return __builder.Regex(fieldExpression.FieldName, new BsonRegularExpression(pattern, options));
         }
 
-        private FilterDefinition<BsonDocument> BuildTypeComparisonQuery(Expression variableExpression, ExpressionType operatorType, ConstantExpression constantExpression)
+        private FilterDefinition<BsonDocument> TranslateTypeComparisonQuery(Expression variableExpression, ExpressionType operatorType, ConstantExpression constantExpression)
         {
             if (operatorType != ExpressionType.Equal)
             {
@@ -1258,20 +1460,20 @@ namespace MongoDB.Driver.Linq.Translators
                 return null;
             }
 
-            var serializationInfo = GetSerializationInfo(methodCallExpression.Object);
-            var nominalType = serializationInfo.NominalType;
+            var fieldExpression = GetFieldExpression(methodCallExpression.Object);
+            var nominalType = fieldExpression.Serializer.ValueType;
 
             var discriminatorConvention = BsonSerializer.LookupDiscriminatorConvention(nominalType);
             var discriminator = discriminatorConvention.GetDiscriminator(nominalType, actualType);
             if (discriminator == null)
             {
-                return BuildBooleanQuery(true);
+                return TranslateBoolean(true);
             }
 
             var elementName = discriminatorConvention.ElementName;
-            if (serializationInfo.ElementName != null)
+            if (fieldExpression.FieldName != null)
             {
-                elementName = string.Format("{0}.{1}", serializationInfo.ElementName, elementName);
+                elementName = string.Format("{0}.{1}", fieldExpression.FieldName, elementName);
             }
 
             if (discriminator.IsBsonArray)
@@ -1293,7 +1495,7 @@ namespace MongoDB.Driver.Linq.Translators
             }
         }
 
-        private FilterDefinition<BsonDocument> BuildTypeIsQuery(TypeBinaryExpression typeBinaryExpression)
+        private FilterDefinition<BsonDocument> TranslateTypeIsQuery(TypeBinaryExpression typeBinaryExpression)
         {
             var nominalType = typeBinaryExpression.Expression.Type;
             var actualType = typeBinaryExpression.TypeOperand;
@@ -1302,7 +1504,7 @@ namespace MongoDB.Driver.Linq.Translators
             var discriminator = discriminatorConvention.GetDiscriminator(nominalType, actualType);
             if (discriminator == null)
             {
-                return BuildBooleanQuery(true);
+                return TranslateBoolean(true);
             }
 
             if (discriminator.IsBsonArray)
@@ -1311,10 +1513,10 @@ namespace MongoDB.Driver.Linq.Translators
             }
 
             var elementName = discriminatorConvention.ElementName;
-            var serializationInfo = GetSerializationInfo(typeBinaryExpression.Expression);
-            if (serializationInfo.ElementName != null)
+            IFieldExpression fieldExpression;
+            if (TryGetFieldExpression(typeBinaryExpression.Expression, out fieldExpression))
             {
-                elementName = string.Format("{0}.{1}", serializationInfo.ElementName, elementName);
+                elementName = string.Format("{0}.{1}", fieldExpression.FieldName, elementName);
             }
             return __builder.Eq(elementName, discriminator);
         }
@@ -1386,39 +1588,36 @@ namespace MongoDB.Driver.Linq.Translators
             }
         }
 
-        private bool TryGetSerializationInfo(Expression expression, out BsonSerializationInfo serializationInfo)
+        private bool TryGetFieldExpression(Expression expression, out IFieldExpression fieldExpression)
         {
-            var serializationExpression = expression as ISerializationExpression;
-            if (serializationExpression != null)
-            {
-                serializationInfo = serializationExpression.SerializationInfo;
-                return true;
-            }
-
-            serializationInfo = null;
-            return false;
+            return ExpressionHelper.TryGetExpression(expression, out fieldExpression);
         }
 
-        private BsonSerializationInfo GetSerializationInfo(Expression expression)
+        private IFieldExpression GetFieldExpression(Expression expression)
         {
-            BsonSerializationInfo serializationInfo;
-            if (!TryGetSerializationInfo(expression, out serializationInfo))
+            IFieldExpression fieldExpression;
+            if (!TryGetFieldExpression(expression, out fieldExpression))
             {
-                throw new InvalidOperationException(string.Format("{0} is not supported.", expression));
+                var message = string.Format("{0} is not supported.",
+                    expression.ToString());
+                throw new InvalidOperationException(message);
             }
 
-            return serializationInfo;
+            return fieldExpression;
         }
 
-        private BsonSerializationInfo GetItemSerializationInfo(string methodName, BsonSerializationInfo info)
+        private class DocumentToFieldConverter : ExtensionExpressionVisitor
         {
-            var arraySerializer = info.Serializer as IBsonArraySerializer;
-            if (arraySerializer == null)
+            public static Expression Convert(Expression node)
             {
-                throw new InvalidOperationException(string.Format("{0} must have a serializer that supports retrieving item serialization info.", methodName));
+                var visitor = new DocumentToFieldConverter();
+                return visitor.Visit(node);
             }
 
-            return arraySerializer.GetItemSerializationInfo();
+            protected internal override Expression VisitDocument(DocumentExpression node)
+            {
+                return new FieldExpression("", node.Serializer);
+            }
         }
     }
 }

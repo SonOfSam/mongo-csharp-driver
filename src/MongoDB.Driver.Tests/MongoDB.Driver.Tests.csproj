@@ -41,8 +41,7 @@
     <DefineConstants>DEBUG;TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
-    <CodeAnalysisRuleSet>AllRules.ruleset</CodeAnalysisRuleSet>
-    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
@@ -52,7 +51,6 @@
     <DefineConstants>TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
-    <CodeAnalysisRuleSet>AllRules.ruleset</CodeAnalysisRuleSet>
     <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
   <PropertyGroup>
@@ -62,22 +60,21 @@
     <AssemblyOriginatorKeyFile>..\Keys\TemporaryKeyPair.snk</AssemblyOriginatorKeyFile>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="FluentAssertions, Version=3.2.1.0, Culture=neutral, PublicKeyToken=33f2691a05b67b6a, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\packages\FluentAssertions.3.2.1\lib\net45\FluentAssertions.dll</HintPath>
+    <Reference Include="FluentAssertions, Version=3.5.0.0, Culture=neutral, PublicKeyToken=33f2691a05b67b6a, processorArchitecture=MSIL">
+      <HintPath>..\packages\FluentAssertions.3.5.0\lib\net45\FluentAssertions.dll</HintPath>
       <Private>True</Private>
     </Reference>
-    <Reference Include="FluentAssertions.Core, Version=3.2.1.0, Culture=neutral, PublicKeyToken=33f2691a05b67b6a, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\packages\FluentAssertions.3.2.1\lib\net45\FluentAssertions.Core.dll</HintPath>
+    <Reference Include="FluentAssertions.Core, Version=3.5.0.0, Culture=neutral, PublicKeyToken=33f2691a05b67b6a, processorArchitecture=MSIL">
+      <HintPath>..\packages\FluentAssertions.3.5.0\lib\net45\FluentAssertions.Core.dll</HintPath>
+      <Private>True</Private>
     </Reference>
-    <Reference Include="NSubstitute, Version=1.8.0.0, Culture=neutral, PublicKeyToken=92dd2e9066daa5ca, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\packages\NSubstitute.1.8.0.0\lib\net45\NSubstitute.dll</HintPath>
+    <Reference Include="NSubstitute, Version=1.8.2.0, Culture=neutral, PublicKeyToken=92dd2e9066daa5ca, processorArchitecture=MSIL">
+      <HintPath>..\packages\NSubstitute.1.8.2.0\lib\net45\NSubstitute.dll</HintPath>
+      <Private>True</Private>
     </Reference>
-    <Reference Include="nunit.framework, Version=2.5.9.10348, Culture=neutral, PublicKeyToken=96d09a1eb7f44a77, processorArchitecture=MSIL">
+    <Reference Include="nunit.framework, Version=2.6.4.14350, Culture=neutral, PublicKeyToken=96d09a1eb7f44a77, processorArchitecture=MSIL">
       <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\..\Tools\NUnit\nunit.framework.dll</HintPath>
+      <HintPath>..\packages\NUnit.2.6.4\lib\nunit.framework.dll</HintPath>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.configuration" />
@@ -91,22 +88,40 @@
     <Compile Include="..\MongoDB.Shared\GlobalAssemblyInfo.cs">
       <Link>Properties\GlobalAssemblyInfo.cs</Link>
     </Compile>
+    <Compile Include="AggregateFluentTests.cs" />
     <Compile Include="BulkWriteErrorTests.cs" />
     <Compile Include="FieldDefinitionTests.cs" />
+    <Compile Include="FindFluentTests.cs" />
+    <Compile Include="Linq\Translators\AggregateGroupTranslatorTests.cs" />
+    <Compile Include="Linq\Translators\AggregateProjectTranslatorTests.cs" />
+    <Compile Include="Linq\IntegrationTestBase.cs" />
+    <Compile Include="Linq\MongoQueryableTests.cs" />
+    <Compile Include="Linq\Processors\PartialEvaluatorTests.cs" />
     <Compile Include="Linq\Translators\LegacyPredicateTranslatorTests.cs" />
-    <Compile Include="Linq\Translators\TranslatorTestBase.cs" />
     <Compile Include="Linq\Translators\PredicateTranslatorTests.cs" />
+    <Compile Include="OfTypeMongoCollectionTests.cs" />
     <Compile Include="PipelineDefinitionTests.cs" />
     <Compile Include="ProjectionDefinitionBuilderTests.cs" />
     <Compile Include="IndexKeysDefinitionBuilderTests.cs" />
     <Compile Include="SortDefinitionBuilderTests.cs" />
+    <Compile Include="Specifications\command-monitoring\CountTest.cs" />
+    <Compile Include="Specifications\command-monitoring\BulkWriteTest.cs" />
+    <Compile Include="Specifications\command-monitoring\CrudOperationTestBase.cs" />
+    <Compile Include="Specifications\command-monitoring\DeleteManyTest.cs" />
+    <Compile Include="Specifications\command-monitoring\DeleteOneTest.cs" />
+    <Compile Include="Specifications\command-monitoring\FindTest.cs" />
+    <Compile Include="Specifications\command-monitoring\ICrudOperationTest.cs" />
+    <Compile Include="Specifications\command-monitoring\InsertManyTest.cs" />
+    <Compile Include="Specifications\command-monitoring\InsertOneTest.cs" />
+    <Compile Include="Specifications\command-monitoring\TestRunner.cs" />
+    <Compile Include="Specifications\command-monitoring\UpdateManyTest.cs" />
+    <Compile Include="Specifications\command-monitoring\UpdateOneTest.cs" />
+    <Compile Include="Specifications\crud\CrudOperationTestBase.cs" />
     <Compile Include="UpdateDefinitionBuilderTests.cs" />
     <Compile Include="FilterDefinitionBuilderTests.cs" />
     <Compile Include="IAggregateFluentExtensionsTests.cs" />
     <Compile Include="IFindFluentExtensionsTests.cs" />
     <Compile Include="IMongoCollectionExtensionsTests.cs" />
-    <Compile Include="Linq\Translators\AggregateProjectionTranslatorTests_Group.cs" />
-    <Compile Include="Linq\Translators\AggregateProjectionTranslatorTests_Project.cs" />
     <Compile Include="Linq\Translators\FindProjectionTranslatorTests.cs" />
     <Compile Include="Linq\Translators\ProjectedObjectDeserializerTests.cs" />
     <Compile Include="Linq\Translators\ProjectedObjectTests.cs" />
@@ -229,6 +244,24 @@
     <EmbeddedResource Include="Specifications\crud\tests\write\replaceOne.json" />
     <EmbeddedResource Include="Specifications\crud\tests\write\updateMany.json" />
     <EmbeddedResource Include="Specifications\crud\tests\write\updateOne.json" />
+    <EmbeddedResource Include="Specifications\command-monitoring\tests\command.json" />
+    <EmbeddedResource Include="Specifications\command-monitoring\tests\command.yml" />
+    <EmbeddedResource Include="Specifications\command-monitoring\tests\deleteOne.json" />
+    <EmbeddedResource Include="Specifications\command-monitoring\tests\deleteOne.yml" />
+    <EmbeddedResource Include="Specifications\command-monitoring\tests\find.json" />
+    <EmbeddedResource Include="Specifications\command-monitoring\tests\find.yml" />
+    <EmbeddedResource Include="Specifications\command-monitoring\tests\insertOne.json" />
+    <EmbeddedResource Include="Specifications\command-monitoring\tests\insertOne.yml" />
+    <EmbeddedResource Include="Specifications\command-monitoring\tests\updateOne.json" />
+    <EmbeddedResource Include="Specifications\command-monitoring\tests\updateOne.yml" />
+    <EmbeddedResource Include="Specifications\command-monitoring\tests\bulkWrite.json" />
+    <EmbeddedResource Include="Specifications\command-monitoring\tests\bulkWrite.yml" />
+    <EmbeddedResource Include="Specifications\command-monitoring\tests\deleteMany.json" />
+    <EmbeddedResource Include="Specifications\command-monitoring\tests\deleteMany.yml" />
+    <EmbeddedResource Include="Specifications\command-monitoring\tests\insertMany.json" />
+    <EmbeddedResource Include="Specifications\command-monitoring\tests\insertMany.yml" />
+    <EmbeddedResource Include="Specifications\command-monitoring\tests\updateMany.json" />
+    <EmbeddedResource Include="Specifications\command-monitoring\tests\updateMany.yml" />
     <None Include="testcert.pfx">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

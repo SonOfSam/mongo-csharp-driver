@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ using FluentAssertions;
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization;
 using MongoDB.Bson.Serialization.Serializers;
+using MongoDB.Driver.Core.Misc;
 using NUnit.Framework;
 
 namespace MongoDB.Driver.Core.Operations
@@ -70,9 +71,11 @@ namespace MongoDB.Driver.Core.Operations
 
         [Test]
         [RequiresServer]
-        public async Task ExecuteAsync_should_return_expected_results()
+        public void Execute_should_return_expected_results(
+            [Values(false, true)]
+            bool async)
         {
-            await EnsureTestDataAsync();
+            EnsureTestData();
 
             var mapFunction = "function() { emit(this.x, this.v); }";
             var reduceFunction = "function(key, values) { var sum = 0; for (var i = 0; i < values.length; i++) { sum += values[i]; }; return sum; }";
@@ -83,18 +86,58 @@ namespace MongoDB.Driver.Core.Operations
                 new BsonDocument { {"_id", 2 }, { "value", 4 } },
             };
 
-            var cursor = await ExecuteOperationAsync(subject);
-            var results = await cursor.ToListAsync();
+            var cursor = ExecuteOperation(subject, async);
+            var results = ReadCursorToEnd(cursor, async);
 
             results.Should().Equal(expectedResults);
         }
 
         [Test]
-        public void ExecuteAsync_should_throw_when_binding_is_null()
+        public void CreateCommand_should_include_read_concern_when_appropriate(
+            [Values(null, ReadConcernLevel.Local, ReadConcernLevel.Majority)] ReadConcernLevel? readConcernLevel)
+        {
+            var readConcern = new ReadConcern(readConcernLevel);
+            var mapFunction = "function() { emit(this.x, this.v); }";
+            var reduceFunction = "function(key, values) { var sum = 0; for (var i = 0; i < values.length; i++) { sum += values[i]; }; return sum; }";
+            var subject = new MapReduceOperation<BsonDocument>(_collectionNamespace, mapFunction, reduceFunction, _resultSerializer, _messageEncoderSettings)
+            {
+                ReadConcern = readConcern
+            };
+
+            var command = subject.CreateCommand(new SemanticVersion(3, 2, 0));
+
+            if (readConcern.IsServerDefault)
+            {
+                command.Contains("readConcern").Should().BeFalse();
+            }
+            else
+            {
+                command["readConcern"].Should().Be(readConcern.ToBsonDocument());
+            }
+        }
+
+        [Test]
+        public void CreateCommand_should_throw_when_read_concern_is_not_supported()
+        {
+            var mapFunction = "function() { emit(this.x, this.v); }";
+            var reduceFunction = "function(key, values) { var sum = 0; for (var i = 0; i < values.length; i++) { sum += values[i]; }; return sum; }";
+            var subject = new MapReduceOperation<BsonDocument>(_collectionNamespace, mapFunction, reduceFunction, _resultSerializer, _messageEncoderSettings)
+            {
+                ReadConcern = ReadConcern.Majority
+            };
+
+            Action act = () => subject.CreateCommand(new SemanticVersion(3, 0, 0));
+            act.ShouldThrow<MongoClientException>();
+        }
+
+        [Test]
+        public void Execute_should_throw_when_binding_is_null(
+            [Values(false, true)]
+            bool async)
         {
             var subject = new MapReduceOperation<BsonDocument>(_collectionNamespace, _mapFunction, _reduceFunction, _resultSerializer, _messageEncoderSettings);
 
-            Func<Task> act = () => subject.ExecuteAsync(null, CancellationToken.None);
+            Action act = () => ExecuteOperation(subject, null, async);
 
             act.ShouldThrow<ArgumentNullException>().And.ParamName.Should().Be("binding");
         }
@@ -110,13 +153,13 @@ namespace MongoDB.Driver.Core.Operations
         }
 
         // helper methods
-        private async Task EnsureTestDataAsync()
+        private void EnsureTestData()
         {
-            await DropCollectionAsync();
-            await InsertAsync(
+            DropCollection();
+            Insert(
                 new BsonDocument { { "_id", 1 }, { "x", 1 }, { "v", 1 } },
                 new BsonDocument { { "_id", 2 }, { "x", 1 }, { "v", 2 } },
-                new BsonDocument { { "_id", 3 }, { "x", 2 }, { "v", 4 } });        
+                new BsonDocument { { "_id", 3 }, { "x", 2 }, { "v", 4 } });
         }
 
         // nested types

@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -33,11 +33,15 @@ namespace MongoDB.Driver.Core.Operations
         private bool? _autoIndexId;
         private bool? _capped;
         private readonly CollectionNamespace _collectionNamespace;
+        private BsonDocument _indexOptionDefaults;
         private long? _maxDocuments;
         private long? _maxSize;
         private readonly MessageEncoderSettings _messageEncoderSettings;
         private BsonDocument _storageEngine;
         private bool? _usePowerOf2Sizes;
+        private DocumentValidationAction? _validationAction;
+        private DocumentValidationLevel? _validationLevel;
+        private BsonDocument _validator;
 
         // constructors
         /// <summary>
@@ -49,7 +53,7 @@ namespace MongoDB.Driver.Core.Operations
             CollectionNamespace collectionNamespace,
             MessageEncoderSettings messageEncoderSettings)
         {
-            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, "collectionNamespace");
+            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, nameof(collectionNamespace));
             _messageEncoderSettings = messageEncoderSettings;
         }
 
@@ -90,6 +94,18 @@ namespace MongoDB.Driver.Core.Operations
         }
 
         /// <summary>
+        /// Gets or sets the index option defaults.
+        /// </summary>
+        /// <value>
+        /// The index option defaults.
+        /// </value>
+        public BsonDocument IndexOptionDefaults
+        {
+            get { return _indexOptionDefaults; }
+            set { _indexOptionDefaults = value; }
+        }
+
+        /// <summary>
         /// Gets or sets the maximum number of documents in a capped collection.
         /// </summary>
         /// <value>
@@ -98,7 +114,7 @@ namespace MongoDB.Driver.Core.Operations
         public long? MaxDocuments
         {
             get { return _maxDocuments; }
-            set { _maxDocuments = Ensure.IsNullOrGreaterThanZero(value, "value"); }
+            set { _maxDocuments = Ensure.IsNullOrGreaterThanZero(value, nameof(value)); }
         }
 
         /// <summary>
@@ -110,7 +126,7 @@ namespace MongoDB.Driver.Core.Operations
         public long? MaxSize
         {
             get { return _maxSize; }
-            set { _maxSize = Ensure.IsNullOrGreaterThanZero(value, "value"); }
+            set { _maxSize = Ensure.IsNullOrGreaterThanZero(value, nameof(value)); }
         }
 
         /// <summary>
@@ -148,6 +164,42 @@ namespace MongoDB.Driver.Core.Operations
             set { _usePowerOf2Sizes = value; }
         }
 
+        /// <summary>
+        /// Gets or sets the validation action.
+        /// </summary>
+        /// <value>
+        /// The validation action.
+        /// </value>
+        public DocumentValidationAction? ValidationAction
+        {
+            get { return _validationAction; }
+            set { _validationAction = value; }
+        }
+
+        /// <summary>
+        /// Gets or sets the validation level.
+        /// </summary>
+        /// <value>
+        /// The validation level.
+        /// </value>
+        public DocumentValidationLevel? ValidationLevel
+        {
+            get { return _validationLevel; }
+            set { _validationLevel = value; }
+        }
+
+        /// <summary>
+        /// Gets or sets the validator.
+        /// </summary>
+        /// <value>
+        /// The validator.
+        /// </value>
+        public BsonDocument Validator
+        {
+            get { return _validator; }
+            set { _validator = value; }
+        }
+
         // methods
         internal BsonDocument CreateCommand()
         {
@@ -159,17 +211,34 @@ namespace MongoDB.Driver.Core.Operations
                 { "size", () => _maxSize.Value, _maxSize.HasValue },
                 { "max", () => _maxDocuments.Value, _maxDocuments.HasValue },
                 { "flags", () => _usePowerOf2Sizes.Value ? 1 : 0, _usePowerOf2Sizes.HasValue},
-                { "storageEngine", () => _storageEngine, _storageEngine != null }
+                { "storageEngine", () => _storageEngine, _storageEngine != null },
+                { "indexOptionDefaults", _indexOptionDefaults, _indexOptionDefaults != null },
+                { "validator", _validator, _validator != null },
+                { "validationAction", () => _validationAction.Value.ToString().ToLowerInvariant(), _validationAction.HasValue },
+                { "validationLevel", () => _validationLevel.Value.ToString().ToLowerInvariant(), _validationLevel.HasValue }
             };
+        }
+
+        /// <inheritdoc/>
+        public BsonDocument Execute(IWriteBinding binding, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNull(binding, nameof(binding));
+            var operation = CreateOperation();
+            return operation.Execute(binding, cancellationToken);
         }
 
         /// <inheritdoc/>
         public async Task<BsonDocument> ExecuteAsync(IWriteBinding binding, CancellationToken cancellationToken)
         {
-            Ensure.IsNotNull(binding, "binding");
-            var command = CreateCommand();
-            var operation = new WriteCommandOperation<BsonDocument>(_collectionNamespace.DatabaseNamespace, command, BsonDocumentSerializer.Instance, _messageEncoderSettings);
+            Ensure.IsNotNull(binding, nameof(binding));
+            var operation = CreateOperation();
             return await operation.ExecuteAsync(binding, cancellationToken).ConfigureAwait(false);
+        }
+
+        private WriteCommandOperation<BsonDocument> CreateOperation()
+        {
+            var command = CreateCommand();
+            return new WriteCommandOperation<BsonDocument>(_collectionNamespace.DatabaseNamespace, command, BsonDocumentSerializer.Instance, _messageEncoderSettings);
         }
     }
 }

@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ using MongoDB.Bson.IO;
 using MongoDB.Bson.Serialization;
 using MongoDB.Bson.Serialization.Serializers;
 using MongoDB.Driver.Core.Bindings;
+using MongoDB.Driver.Core.Connections;
 using MongoDB.Driver.Core.Misc;
 using MongoDB.Driver.Core.WireProtocol.Messages.Encoders;
 
@@ -39,6 +40,7 @@ namespace MongoDB.Driver.Core.Operations
         private readonly CollectionNamespace _collectionNamespace;
         private readonly MessageEncoderSettings _messageEncoderSettings;
         private readonly IBsonSerializer<TResult> _resultSerializer;
+        private WriteConcern _writeConcern;
 
         // constructors
         /// <summary>
@@ -49,9 +51,9 @@ namespace MongoDB.Driver.Core.Operations
         /// <param name="messageEncoderSettings">The message encoder settings.</param>
         public FindAndModifyOperationBase(CollectionNamespace collectionNamespace, IBsonSerializer<TResult> resultSerializer, MessageEncoderSettings messageEncoderSettings)
         {
-            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, "collectionNamespace");
-            _resultSerializer = Ensure.IsNotNull(resultSerializer, "resultSerializer");
-            _messageEncoderSettings = Ensure.IsNotNull(messageEncoderSettings, "messageEncoderSettings");
+            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, nameof(collectionNamespace));
+            _resultSerializer = Ensure.IsNotNull(resultSerializer, nameof(resultSerializer));
+            _messageEncoderSettings = Ensure.IsNotNull(messageEncoderSettings, nameof(messageEncoderSettings));
         }
 
         // properties
@@ -88,19 +90,60 @@ namespace MongoDB.Driver.Core.Operations
             get { return _resultSerializer; }
         }
 
-        // methods
-        internal abstract BsonDocument CreateCommand();
+        /// <summary>
+        /// Gets or sets the write concern.
+        /// </summary>
+        public WriteConcern WriteConcern
+        {
+            get { return _writeConcern; }
+            set { _writeConcern = value; }
+        }
+
+        // public methods
+        /// <inheritdoc/>
+        public TResult Execute(IWriteBinding binding, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNull(binding, nameof(binding));
+
+            using (var channelSource = binding.GetWriteChannelSource(cancellationToken))
+            using (var channel = channelSource.GetChannel(cancellationToken))
+            using (var channelBinding = new ChannelReadWriteBinding(channelSource.Server, channel))
+            {
+                var operation = CreateOperation(channel.ConnectionDescription.ServerVersion);
+                using (var rawBsonDocument = operation.Execute(channelBinding, cancellationToken))
+                {
+                    return ProcessCommandResult(channel.ConnectionDescription.ConnectionId, rawBsonDocument);
+                }
+            }
+        }
 
         /// <inheritdoc/>
-        public Task<TResult> ExecuteAsync(IWriteBinding binding, CancellationToken cancellationToken)
+        public async Task<TResult> ExecuteAsync(IWriteBinding binding, CancellationToken cancellationToken)
         {
-            Ensure.IsNotNull(binding, "binding");
-            var command = CreateCommand();
-            var operation = new WriteCommandOperation<TResult>(_collectionNamespace.DatabaseNamespace, command, _resultSerializer, _messageEncoderSettings)
+            Ensure.IsNotNull(binding, nameof(binding));
+
+            using (var channelSource = await binding.GetWriteChannelSourceAsync(cancellationToken).ConfigureAwait(false))
+            using (var channel = await channelSource.GetChannelAsync(cancellationToken).ConfigureAwait(false))
+            using (var channelBinding = new ChannelReadWriteBinding(channelSource.Server, channel))
+            {
+                var operation = CreateOperation(channel.ConnectionDescription.ServerVersion);
+                using (var rawBsonDocument = await operation.ExecuteAsync(channelBinding, cancellationToken).ConfigureAwait(false))
+                {
+                    return ProcessCommandResult(channel.ConnectionDescription.ConnectionId, rawBsonDocument);
+                }
+            }
+        }
+
+        // private methods
+        internal abstract BsonDocument CreateCommand(SemanticVersion serverVersion);
+
+        private WriteCommandOperation<RawBsonDocument> CreateOperation(SemanticVersion serverVersion)
+        {
+            var command = CreateCommand(serverVersion);
+            return new WriteCommandOperation<RawBsonDocument>(_collectionNamespace.DatabaseNamespace, command, RawBsonDocumentSerializer.Instance, _messageEncoderSettings)
             {
                 CommandValidator = GetCommandValidator()
             };
-            return operation.ExecuteAsync(binding, cancellationToken);
         }
 
         /// <summary>
@@ -108,5 +151,31 @@ namespace MongoDB.Driver.Core.Operations
         /// </summary>
         /// <returns>An element name validator for the command.</returns>
         protected abstract IElementNameValidator GetCommandValidator();
+
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Usage", "CA2202:Do not dispose objects multiple times")]
+        private TResult ProcessCommandResult(ConnectionId connectionId, RawBsonDocument rawBsonDocument)
+        {
+            var binaryReaderSettings = new BsonBinaryReaderSettings
+            {
+                Encoding = _messageEncoderSettings.GetOrDefault<UTF8Encoding>(MessageEncoderSettingsName.ReadEncoding, Utf8Encodings.Strict),
+                GuidRepresentation = _messageEncoderSettings.GetOrDefault<GuidRepresentation>(MessageEncoderSettingsName.GuidRepresentation, GuidRepresentation.CSharpLegacy)
+            };
+
+            BsonValue writeConcernError;
+            if (rawBsonDocument.TryGetValue("writeConcernError", out writeConcernError))
+            {
+                var message = writeConcernError["errmsg"].AsString;
+                var response = rawBsonDocument.Materialize(binaryReaderSettings);
+                var writeConcernResult = new WriteConcernResult(response);
+                throw new MongoWriteConcernException(connectionId, message, writeConcernResult);
+            }
+
+            using (var stream = new ByteBufferStream(rawBsonDocument.Slice, ownsBuffer: false))
+            using (var reader = new BsonBinaryReader(stream, binaryReaderSettings))
+            {
+                var context = BsonDeserializationContext.CreateRoot(reader);
+                return _resultSerializer.Deserialize(context);
+            }
+        }
     }
 }

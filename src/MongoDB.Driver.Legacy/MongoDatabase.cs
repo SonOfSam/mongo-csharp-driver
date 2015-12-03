@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -207,10 +207,14 @@ namespace MongoDB.Driver
             var messageEncoderSettings = GetMessageEncoderSettings();
             bool? autoIndexId = null;
             bool? capped = null;
+            BsonDocument indexOptionDefaults = null;
             int? maxDocuments = null;
             long? maxSize = null;
             BsonDocument storageEngine = null;
             bool? usePowerOf2Sizes = null;
+            DocumentValidationAction? validationAction = null;
+            DocumentValidationLevel? validationLevel = null;
+            BsonDocument validator = null;
 
             if (options != null)
             {
@@ -224,6 +228,10 @@ namespace MongoDB.Driver
                 if (optionsDocument.TryGetValue("capped", out value))
                 {
                     capped = value.ToBoolean();
+                }
+                if (optionsDocument.TryGetValue("indexOptionDefaults", out value))
+                {
+                    indexOptionDefaults = value.AsBsonDocument;
                 }
                 if (optionsDocument.TryGetValue("max", out value))
                 {
@@ -241,16 +249,32 @@ namespace MongoDB.Driver
                 {
                     usePowerOf2Sizes = value.ToInt32() == 1;
                 }
+                if (optionsDocument.TryGetValue("validationAction", out value))
+                {
+                    validationAction = (DocumentValidationAction)Enum.Parse(typeof(DocumentValidationAction), value.AsString, ignoreCase: true);
+                }
+                if (optionsDocument.TryGetValue("validationLevel", out value))
+                {
+                    validationLevel = (DocumentValidationLevel)Enum.Parse(typeof(DocumentValidationLevel), value.AsString, ignoreCase: true);
+                }
+                if (optionsDocument.TryGetValue("validator", out value))
+                {
+                    validator = value.AsBsonDocument;
+                }
             }
 
             var operation = new CreateCollectionOperation(collectionNamespace, messageEncoderSettings)
             {
                 AutoIndexId = autoIndexId,
                 Capped = capped,
+                IndexOptionDefaults = indexOptionDefaults,
                 MaxDocuments = maxDocuments,
                 MaxSize = maxSize,
                 StorageEngine = storageEngine,
-                UsePowerOf2Sizes = usePowerOf2Sizes
+                UsePowerOf2Sizes = usePowerOf2Sizes,
+                ValidationAction = validationAction,
+                ValidationLevel = validationLevel,
+                Validator = validator
             };
 
             var response = ExecuteWriteOperation(operation);
@@ -329,7 +353,7 @@ namespace MongoDB.Driver
 
             using (var binding = _server.GetWriteBinding())
             {
-                return operation.Execute(binding);
+                return operation.Execute(binding, CancellationToken.None);
             }
         }
 
@@ -529,7 +553,7 @@ namespace MongoDB.Driver
         {
             var operation = new ListCollectionsOperation(_namespace, GetMessageEncoderSettings());
             var cursor = ExecuteReadOperation(operation, ReadPreference.Primary);
-            var list = cursor.ToListAsync().GetAwaiter().GetResult();
+            var list = cursor.ToList();
             return list.Select(c => c["name"].AsString).OrderBy(n => n).ToList();
         }
 
@@ -539,8 +563,8 @@ namespace MongoDB.Driver
         /// <returns>The current operation.</returns>
         public virtual BsonDocument GetCurrentOp()
         {
-            var collection = GetCollection("$cmd.sys.inprog");
-            return collection.FindOne();
+            var operation = new CurrentOpOperation(_namespace, GetMessageEncoderSettings());
+            return ExecuteReadOperation(operation);
         }
 
         /// <summary>
@@ -834,7 +858,7 @@ namespace MongoDB.Driver
             readPreference = readPreference ?? _settings.ReadPreference ?? ReadPreference.Primary;
             using (var binding = _server.GetReadBinding(readPreference))
             {
-                return operation.Execute(binding);
+                return operation.Execute(binding, CancellationToken.None);
             }
         }
 
@@ -842,7 +866,7 @@ namespace MongoDB.Driver
         {
             using (var binding = _server.GetWriteBinding())
             {
-                return operation.Execute(binding);
+                return operation.Execute(binding, CancellationToken.None);
             }
         }
 

@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
 using MongoDB.Bson.Serialization.Attributes;
+using MongoDB.Driver.Linq;
 using NUnit.Framework;
 
 namespace MongoDB.Driver.Tests.Samples
@@ -30,11 +31,11 @@ namespace MongoDB.Driver.Tests.Samples
         {
             var client = DriverTestConfiguration.Client;
             var db = client.GetDatabase(DriverTestConfiguration.DatabaseNamespace.DatabaseName);
-            db.DropCollectionAsync(DriverTestConfiguration.CollectionNamespace.CollectionName).GetAwaiter().GetResult();
+            db.DropCollection(DriverTestConfiguration.CollectionNamespace.CollectionName);
             _collection = db.GetCollection<ZipEntry>(DriverTestConfiguration.CollectionNamespace.CollectionName);
 
             // This is a subset of the data from the mongodb docs zip code aggregation examples
-            _collection.InsertManyAsync(new[] 
+            _collection.InsertMany(new[]
             {
                 new ZipEntry { Zip = "01053", City = "LEEDS", State = "MA", Population = 1350 },
                 new ZipEntry { Zip = "01054", City = "LEVERETT", State = "MA", Population = 1748 },
@@ -44,7 +45,7 @@ namespace MongoDB.Driver.Tests.Samples
                 new ZipEntry { Zip = "36782", City = "SWEET WATER", State = "AL", Population = 2444 },
                 new ZipEntry { Zip = "36783", City = "THOMASTON", State = "AL", Population = 1527 },
                 new ZipEntry { Zip = "36784", City = "THOMASVILLE", State = "AL", Population = 6229 },
-            }).GetAwaiter().GetResult();
+            });
         }
 
         [Test]
@@ -62,6 +63,33 @@ namespace MongoDB.Driver.Tests.Samples
 
             result.Count.Should().Be(1);
         }
+
+        [Test]
+        public async Task States_with_pops_over_20000_queryable_method()
+        {
+            var pipeline = _collection.AsQueryable()
+                .GroupBy(x => x.State, (k, s) => new { State = k, TotalPopulation = s.Sum(x => x.Population) })
+                .Where(x => x.TotalPopulation > 20000);
+
+            var result = await pipeline.ToListAsync();
+
+            result.Count.Should().Be(1);
+        }
+
+#if !MONO
+        [Test]
+        public async Task States_with_pops_over_20000_queryable_syntax()
+        {
+            var pipeline = from z in _collection.AsQueryable()
+                           group z by z.State into g
+                           where g.Sum(x => x.Population) > 20000
+                           select new { State = g.Key, TotalPopulation = g.Sum(x => x.Population) };
+
+            var result = await pipeline.ToListAsync();
+
+            result.Count.Should().Be(1);
+        }
+#endif
 
         [Test]
         public async Task Average_city_population_by_state()
@@ -126,6 +154,40 @@ namespace MongoDB.Driver.Tests.Samples
             result[1].SmallestCity.Name.Should().Be("LEEDS");
             result[1].SmallestCity.Population.Should().Be(1350);
         }
+#if !MONO
+        [Test]
+        public async Task Largest_and_smallest_cities_by_state_queryable_syntax()
+        {
+            var pipeline = from o in
+                               (
+                                    from z in _collection.AsQueryable()
+                                    group z by new { z.State, z.City } into g
+                                    select new { StateAndCity = g.Key, Population = g.Sum(x => x.Population) }
+                               )
+                           orderby o.Population
+                           group o by o.StateAndCity.State into g
+                           orderby g.Key
+                           select new
+                           {
+                               State = g.Key,
+                               BiggestCity = new { Name = g.Last().StateAndCity.City, Population = g.Last().Population },
+                               SmallestCity = new { Name = g.First().StateAndCity.City, Population = g.First().Population }
+                           };
+
+            var result = await pipeline.ToListAsync();
+
+            result[0].State.Should().Be("AL");
+            result[0].BiggestCity.Name.Should().Be("THOMASVILLE");
+            result[0].BiggestCity.Population.Should().Be(6229);
+            result[0].SmallestCity.Name.Should().Be("SPROTT");
+            result[0].SmallestCity.Population.Should().Be(1191);
+            result[1].State.Should().Be("MA");
+            result[1].BiggestCity.Name.Should().Be("LUDLOW");
+            result[1].BiggestCity.Population.Should().Be(18820);
+            result[1].SmallestCity.Name.Should().Be("LEEDS");
+            result[1].SmallestCity.Population.Should().Be(1350);
+        }
+#endif
 
         [BsonIgnoreExtraElements]
         private class ZipEntry

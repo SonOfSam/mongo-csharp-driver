@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ using MongoDB.Bson.IO;
 using MongoDB.Bson.Serialization;
 using MongoDB.Bson.Serialization.Serializers;
 using MongoDB.Driver.Core.Misc;
+using MongoDB.Driver.Core.Operations.ElementNameValidators;
 
 namespace MongoDB.Driver.Core.WireProtocol.Messages.Encoders.BinaryEncoders
 {
@@ -64,6 +65,12 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages.Encoders.BinaryEncoders
         /// <returns>A message.</returns>
         public UpdateMessage ReadMessage()
         {
+            return ReadMessage(BsonDocumentSerializer.Instance);
+        }
+
+        internal UpdateMessage ReadMessage<TDocument>(IBsonSerializer<TDocument> serializer)
+            where TDocument : BsonDocument
+        {
             var binaryReader = CreateBinaryReader();
             var stream = binaryReader.BsonStream;
 
@@ -75,8 +82,8 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages.Encoders.BinaryEncoders
             var fullCollectionName = stream.ReadCString(Encoding);
             var flags = (UpdateFlags)stream.ReadInt32();
             var context = BsonDeserializationContext.CreateRoot(binaryReader);
-            var query = BsonDocumentSerializer.Instance.Deserialize(context);
-            var update = BsonDocumentSerializer.Instance.Deserialize(context);
+            var query = serializer.Deserialize(context);
+            var update = serializer.Deserialize(context);
 
             var isMulti = (flags & UpdateFlags.Multi) == UpdateFlags.Multi;
             var isUpsert = (flags & UpdateFlags.Upsert) == UpdateFlags.Upsert;
@@ -97,7 +104,7 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages.Encoders.BinaryEncoders
         /// <param name="message">The message.</param>
         public void WriteMessage(UpdateMessage message)
         {
-            Ensure.IsNotNull(message, "message");
+            Ensure.IsNotNull(message, nameof(message));
 
             var binaryWriter = CreateBinaryWriter();
             var stream = binaryWriter.BsonStream;
@@ -126,8 +133,13 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages.Encoders.BinaryEncoders
             binaryWriter.PushElementNameValidator(updateValidator);
             try
             {
+                var position = binaryWriter.BaseStream.Position;
                 var context = BsonSerializationContext.CreateRoot(binaryWriter);
                 BsonDocumentSerializer.Instance.Serialize(context, update);
+                if (updateValidator is UpdateElementNameValidator && binaryWriter.BaseStream.Position == position + 5)
+                {
+                    throw new BsonSerializationException("Update documents cannot be empty.");
+                }
             }
             finally
             {

@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -50,7 +50,7 @@ namespace MongoDB.Driver.Core.Operations
         public FindOneAndDeleteOperation(CollectionNamespace collectionNamespace, BsonDocument filter, IBsonSerializer<TResult> resultSerializer, MessageEncoderSettings messageEncoderSettings)
             : base(collectionNamespace, resultSerializer, messageEncoderSettings)
         {
-            _filter = Ensure.IsNotNull(filter, "filter");
+            _filter = Ensure.IsNotNull(filter, nameof(filter));
         }
 
         // properties
@@ -102,7 +102,7 @@ namespace MongoDB.Driver.Core.Operations
         }
 
         // methods
-        internal override BsonDocument CreateCommand()
+        internal override BsonDocument CreateCommand(SemanticVersion serverVersion)
         {
             return new BsonDocument
             {
@@ -111,7 +111,8 @@ namespace MongoDB.Driver.Core.Operations
                 { "sort", _sort, _sort != null },
                 { "remove", true },
                 { "fields", _projection, _projection != null },
-                { "maxTimeMS", () => _maxTime.Value.TotalMilliseconds, _maxTime.HasValue }
+                { "maxTimeMS", () => _maxTime.Value.TotalMilliseconds, _maxTime.HasValue },
+                { "writeConcern", () => WriteConcern.ToBsonDocument(), WriteConcern != null && !WriteConcern.IsServerDefault && SupportedFeatures.IsFindAndModifyWriteConcernSupported(serverVersion) }
             };
         }
 

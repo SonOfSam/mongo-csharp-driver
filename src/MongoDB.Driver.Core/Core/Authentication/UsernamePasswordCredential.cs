@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -50,9 +50,9 @@ namespace MongoDB.Driver.Core.Authentication
         /// <param name="password">The password.</param>
         public UsernamePasswordCredential(string source, string username, SecureString password)
         {
-            _source = Ensure.IsNotNullOrEmpty(source, "source");
-            _username = Ensure.IsNotNullOrEmpty(username, "username");
-            _password = Ensure.IsNotNull(password, "password");
+            _source = Ensure.IsNotNullOrEmpty(source, nameof(source));
+            _username = Ensure.IsNotNullOrEmpty(username, nameof(username));
+            _password = Ensure.IsNotNull(password, nameof(password));
         }
 
         // properties

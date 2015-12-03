@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -119,11 +119,13 @@ namespace MongoDB.Driver.Core.Operations
         }
 
         [Test]
+        [Category("ReadConcern")]
         public void CreateCommand_should_create_the_correct_command(
-            [Values("2.4.0", "2.6.0", "2.8.0")] string serverVersion,
+            [Values("2.4.0", "2.6.0", "2.8.0", "3.0.0", "3.2.0")] string serverVersion,
             [Values(null, false, true)] bool? allowDiskUse,
             [Values(null, 10, 20)] int? batchSize,
             [Values(null, 2000)] int? maxTime,
+            [Values(null, ReadConcernLevel.Local, ReadConcernLevel.Majority)] ReadConcernLevel? readConcernLevel,
             [Values(null, false, true)] bool? useCursor)
         {
             var semanticServerVersion = SemanticVersion.Parse(serverVersion);
@@ -132,6 +134,7 @@ namespace MongoDB.Driver.Core.Operations
                 AllowDiskUse = allowDiskUse,
                 BatchSize = batchSize,
                 MaxTime = maxTime.HasValue ? TimeSpan.FromMilliseconds(maxTime.Value) : (TimeSpan?)null,
+                ReadConcern = new ReadConcern(readConcernLevel),
                 UseCursor = useCursor
             };
 
@@ -143,8 +146,12 @@ namespace MongoDB.Driver.Core.Operations
                 { "maxTimeMS", () => maxTime.Value, maxTime.HasValue }
             };
 
-            var defaultCursorValue = semanticServerVersion >= new SemanticVersion(2, 6, 0);
-            if (useCursor.GetValueOrDefault(defaultCursorValue))
+            if (!subject.ReadConcern.IsServerDefault)
+            {
+                expectedResult["readConcern"] = subject.ReadConcern.ToBsonDocument();
+            }
+
+            if (SupportedFeatures.IsAggregateCursorResultSupported(semanticServerVersion) && useCursor.GetValueOrDefault(true))
             {
                 expectedResult["cursor"] = new BsonDocument
                 {
@@ -152,19 +159,29 @@ namespace MongoDB.Driver.Core.Operations
                 };
             }
 
-            var result = subject.CreateCommand(semanticServerVersion);
-
-            result.Should().Be(expectedResult);
+            if (!subject.ReadConcern.IsSupported(semanticServerVersion))
+            {
+                Action act = () => subject.CreateCommand(semanticServerVersion);
+                act.ShouldThrow<MongoClientException>();
+            }
+            else
+            {
+                var result = subject.CreateCommand(semanticServerVersion);
+                result.Should().Be(expectedResult);
+            }
         }
 
         [Test]
         [RequiresServer("EnsureTestData", MinimumVersion = "2.4.0")]
-        public async Task Executing_with_matching_documents_using_no_options()
+        public void Executing_with_matching_documents_using_no_options(
+            [Values(false, true)]
+            bool async)
         {
             var pipeline = BsonDocument.Parse("{$match: {_id: { $gt: 3}}}");
             var subject = new AggregateOperation<BsonDocument>(_collectionNamespace, new[] { pipeline }, BsonDocumentSerializer.Instance, _messageEncoderSettings);
 
-            var result = await ReadCursorToEndAsync(await ExecuteOperationAsync(subject));
+            var cursor = ExecuteOperation(subject, async);
+            var result = ReadCursorToEnd(cursor, async);
 
             result.Should().NotBeNull();
             result.Should().HaveCount(2);
@@ -172,7 +189,9 @@ namespace MongoDB.Driver.Core.Operations
 
         [Test]
         [RequiresServer("EnsureTestData", MinimumVersion = "2.6.0")]
-        public async Task Executing_with_matching_documents_using_all_options()
+        public void Executing_with_matching_documents_using_all_options(
+            [Values(false, true)]
+            bool async)
         {
             var pipeline = BsonDocument.Parse("{$match: {_id: { $gt: 3}}}");
             var subject = new AggregateOperation<BsonDocument>(_collectionNamespace, new[] { pipeline }, BsonDocumentSerializer.Instance, _messageEncoderSettings)
@@ -182,7 +201,8 @@ namespace MongoDB.Driver.Core.Operations
                 MaxTime = TimeSpan.FromSeconds(20)
             };
 
-            var result = await ReadCursorToEndAsync(await ExecuteOperationAsync(subject));
+            var cursor = ExecuteOperation(subject, async);
+            var result = ReadCursorToEnd(cursor, async);
 
             result.Should().NotBeNull();
             result.Should().HaveCount(2);
@@ -190,7 +210,9 @@ namespace MongoDB.Driver.Core.Operations
 
         [Test]
         [RequiresServer("EnsureTestData", MinimumVersion = "2.6.0")]
-        public async Task Executing_with_matching_documents_using_a_cursor()
+        public void Executing_with_matching_documents_using_a_cursor(
+            [Values(false, true)]
+            bool async)
         {
             var pipeline = BsonDocument.Parse("{$match: {_id: { $gt: 3}}}");
             var subject = new AggregateOperation<BsonDocument>(_collectionNamespace, new[] { pipeline }, BsonDocumentSerializer.Instance, _messageEncoderSettings)
@@ -198,7 +220,8 @@ namespace MongoDB.Driver.Core.Operations
                 UseCursor = true
             };
 
-            var result = await ReadCursorToEndAsync(await ExecuteOperationAsync(subject));
+            var cursor = ExecuteOperation(subject, async);
+            var result = ReadCursorToEnd(cursor, async);
 
             result.Should().NotBeNull();
             result.Should().HaveCount(2);
@@ -206,7 +229,9 @@ namespace MongoDB.Driver.Core.Operations
 
         [Test]
         [RequiresServer("EnsureTestData", MinimumVersion = "2.4.0")]
-        public async Task Executing_with_matching_documents_without_a_cursor()
+        public void Executing_with_matching_documents_without_a_cursor(
+            [Values(false, true)]
+            bool async)
         {
             var pipeline = BsonDocument.Parse("{$match: {_id: { $gt: 3}}}");
             var subject = new AggregateOperation<BsonDocument>(_collectionNamespace, new[] { pipeline }, BsonDocumentSerializer.Instance, _messageEncoderSettings)
@@ -214,7 +239,8 @@ namespace MongoDB.Driver.Core.Operations
                 UseCursor = false
             };
 
-            var result = await ReadCursorToEndAsync(await ExecuteOperationAsync(subject));
+            var cursor = ExecuteOperation(subject, async);
+            var result = ReadCursorToEnd(cursor, async);
 
             result.Should().NotBeNull();
             result.Should().HaveCount(2);
@@ -222,7 +248,9 @@ namespace MongoDB.Driver.Core.Operations
 
         [Test]
         [RequiresServer("EnsureTestData", MinimumVersion = "2.4.0")]
-        public async Task Executing_with_no_matching_documents_without_a_cursor()
+        public void Executing_with_no_matching_documents_without_a_cursor(
+            [Values(false, true)]
+            bool async)
         {
             var pipeline = BsonDocument.Parse("{$match: {_id: { $gt: 5}}}");
             var subject = new AggregateOperation<BsonDocument>(_collectionNamespace, new[] { pipeline }, BsonDocumentSerializer.Instance, _messageEncoderSettings)
@@ -230,7 +258,8 @@ namespace MongoDB.Driver.Core.Operations
                 UseCursor = false
             };
 
-            var result = await ReadCursorToEndAsync(await ExecuteOperationAsync(subject));
+            var cursor = ExecuteOperation(subject, async);
+            var result = ReadCursorToEnd(cursor, async);
 
             result.Should().NotBeNull();
             result.Should().BeEmpty();
@@ -238,7 +267,9 @@ namespace MongoDB.Driver.Core.Operations
 
         [Test]
         [RequiresServer("EnsureTestData", MinimumVersion = "2.6.0")]
-        public async Task Executing_with_no_matching_documents_using_a_cursor()
+        public void Executing_with_no_matching_documents_using_a_cursor(
+            [Values(false, true)]
+            bool async)
         {
             var pipeline = BsonDocument.Parse("{$match: {_id: { $gt: 5}}}");
             var subject = new AggregateOperation<BsonDocument>(_collectionNamespace, new[] { pipeline }, BsonDocumentSerializer.Instance, _messageEncoderSettings)
@@ -246,7 +277,8 @@ namespace MongoDB.Driver.Core.Operations
                 UseCursor = true
             };
 
-            var result = await ReadCursorToEndAsync(await ExecuteOperationAsync(subject));
+            var cursor = ExecuteOperation(subject, async);
+            var result = ReadCursorToEnd(cursor, async);
 
             result.Should().NotBeNull();
             result.Should().BeEmpty();

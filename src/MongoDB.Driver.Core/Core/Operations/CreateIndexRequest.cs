@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -38,6 +38,7 @@ namespace MongoDB.Driver.Core.Operations
         private double? _max;
         private double? _min;
         private string _name;
+        private BsonDocument _partialFilterExpression;
         private bool? _sparse;
         private int? _sphereIndexVersion;
         private BsonDocument _storageEngine;
@@ -53,7 +54,7 @@ namespace MongoDB.Driver.Core.Operations
         /// <param name="keys">The keys.</param>
         public CreateIndexRequest(BsonDocument keys)
         {
-            _keys = Ensure.IsNotNull(keys, "keys");
+            _keys = Ensure.IsNotNull(keys, nameof(keys));
         }
 
         // properties
@@ -189,6 +190,18 @@ namespace MongoDB.Driver.Core.Operations
         }
 
         /// <summary>
+        /// Gets or sets the partial filter expression.
+        /// </summary>
+        /// <value>
+        /// The partial filter expression.
+        /// </value>
+        public BsonDocument PartialFilterExpression
+        {
+            get { return _partialFilterExpression; }
+            set { _partialFilterExpression = value; }
+        }
+
+        /// <summary>
         /// Gets or sets a value indicating whether the index is a sparse index.
         /// </summary>
         /// <value>
@@ -272,15 +285,24 @@ namespace MongoDB.Driver.Core.Operations
             set { _weights = value; }
         }
 
+        // publuc methods
+        /// <summary>
+        /// Gets the name of the index.
+        /// </summary>
+        /// <returns>The name of the index.</returns>
+        public string GetIndexName()
+        {
+            var additionalOptionsName = _additionalOptions == null ? null : (string)_additionalOptions.GetValue("name", null);
+            return _name ?? additionalOptionsName ?? IndexNameHelper.GetIndexName(_keys);
+        }
+
         // methods
         internal BsonDocument CreateIndexDocument()
         {
-            var additionalOptionsName = _additionalOptions == null ? null : _additionalOptions.GetValue("name", null);
-            var name = _name ?? additionalOptionsName ?? IndexNameHelper.GetIndexName(_keys);
             var document = new BsonDocument
             {
                 { "key", _keys },
-                { "name", name },
+                { "name", GetIndexName() },
                 { "background", () => _background.Value, _background.HasValue },
                 { "bits", () => _bits.Value, _bits.HasValue },
                 { "bucketSize", () => _bucketSize.Value, _bucketSize.HasValue },
@@ -289,6 +311,7 @@ namespace MongoDB.Driver.Core.Operations
                 { "language_override", () => _languageOverride, _languageOverride != null },
                 { "max", () => _max.Value, _max.HasValue },
                 { "min", () => _min.Value, _min.HasValue },
+                { "partialFilterExpression", _partialFilterExpression, _partialFilterExpression != null },
                 { "sparse", () => _sparse.Value, _sparse.HasValue },
                 { "2dsphereIndexVersion", () => _sphereIndexVersion.Value, _sphereIndexVersion.HasValue },
                 { "storageEngine", () => _storageEngine, _storageEngine != null },

@@ -23,10 +23,14 @@
     <file src="artifacts\bin\net45\MongoDB.Driver.dll" target="lib\net45" />
     <file src="artifacts\bin\net45\MongoDB.Driver.pdb" target="lib\net45" />
     <file src="artifacts\bin\net45\MongoDB.Driver.XML" target="lib\net45" />
+    <file src="artifacts\bin\net45\MongoDB.Driver.GridFS.dll" target="lib\net45" />
+    <file src="artifacts\bin\net45\MongoDB.Driver.GridFS.pdb" target="lib\net45" />
+    <file src="artifacts\bin\net45\MongoDB.Driver.GridFS.XML" target="lib\net45" />
     <file src="License.rtf" target ="" />
     <file src="src\MongoDB.Bson\**\*.cs" target="src\MongoDB.Bson" />
     <file src="src\MongoDB.Driver.Core\**\*.cs" target="src\MongoDB.Driver.Core" />
     <file src="src\MongoDB.Driver\**\*.cs" target="src\MongoDB.Driver" />
+    <file src="src\MongoDB.Driver.GridFS\**\*.cs" target="src\MongoDB.Driver.GridFS" />
     <file src="src\MongoDB.Shared\**\*.cs" target="src\MongoDB.Shared" />
   </files>
 </package>

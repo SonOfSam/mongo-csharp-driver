@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -13,10 +13,8 @@
 * limitations under the License.
 */
 
-using System;
 using System.Threading;
 using System.Threading.Tasks;
-using MongoDB.Bson;
 using MongoDB.Bson.Serialization;
 
 namespace MongoDB.Driver
@@ -26,11 +24,11 @@ namespace MongoDB.Driver
     /// </summary>
     /// <remarks>
     /// This interface is not guaranteed to remain stable. Implementors should use
-    /// <see cref="FindFluentBase{TDocument, TResult}" />.
+    /// <see cref="FindFluentBase{TDocument, TProjection}" />.
     /// </remarks>
     /// <typeparam name="TDocument">The type of the document.</typeparam>
-    /// <typeparam name="TResult">The type of the result.</typeparam>
-    public interface IFindFluent<TDocument, TResult> : IAsyncCursorSource<TResult>
+    /// <typeparam name="TProjection">The type of the projection (same as TDocument if there is no projection).</typeparam>
+    public interface IFindFluent<TDocument, TProjection> : IAsyncCursorSource<TProjection>
     {
         /// <summary>
         /// Gets or sets the filter.
@@ -40,13 +38,28 @@ namespace MongoDB.Driver
         /// <summary>
         /// Gets the options.
         /// </summary>
-        FindOptions<TDocument, TResult> Options { get; }
+        FindOptions<TDocument, TProjection> Options { get; }
+
+        /// <summary>
+        /// A simplified type of projection that changes the result type by using a different serializer.
+        /// </summary>
+        /// <typeparam name="TResult">The type of the result.</typeparam>
+        /// <param name="resultSerializer">The result serializer.</param>
+        /// <returns>The fluent find interface.</returns>
+        IFindFluent<TDocument, TResult> As<TResult>(IBsonSerializer<TResult> resultSerializer = null);
 
         /// <summary>
         /// Counts the number of documents.
         /// </summary>
         /// <param name="cancellationToken">The cancellation token.</param>
-        /// <returns>The fluent find interface.</returns>
+        /// <returns>The count.</returns>
+        long Count(CancellationToken cancellationToken = default(CancellationToken));
+
+        /// <summary>
+        /// Counts the number of documents.
+        /// </summary>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>A Task whose result is the count.</returns>
         Task<long> CountAsync(CancellationToken cancellationToken = default(CancellationToken));
 
         /// <summary>
@@ -54,37 +67,37 @@ namespace MongoDB.Driver
         /// </summary>
         /// <param name="limit">The limit.</param>
         /// <returns>The fluent find interface.</returns>
-        IFindFluent<TDocument, TResult> Limit(int? limit);
+        IFindFluent<TDocument, TProjection> Limit(int? limit);
 
         /// <summary>
         /// Projects the the result.
         /// </summary>
-        /// <typeparam name="TNewResult">The type of the result.</typeparam>
+        /// <typeparam name="TNewProjection">The type of the projection.</typeparam>
         /// <param name="projection">The projection.</param>
         /// <returns>The fluent find interface.</returns>
-        IFindFluent<TDocument, TNewResult> Project<TNewResult>(ProjectionDefinition<TDocument, TNewResult> projection);
+        IFindFluent<TDocument, TNewProjection> Project<TNewProjection>(ProjectionDefinition<TDocument, TNewProjection> projection);
 
         /// <summary>
         /// Skips the the specified number of documents.
         /// </summary>
         /// <param name="skip">The skip.</param>
         /// <returns>The fluent find interface.</returns>
-        IFindFluent<TDocument, TResult> Skip(int? skip);
+        IFindFluent<TDocument, TProjection> Skip(int? skip);
 
         /// <summary>
         /// Sorts the the documents.
         /// </summary>
         /// <param name="sort">The sort.</param>
         /// <returns>The fluent find interface.</returns>
-        IFindFluent<TDocument, TResult> Sort(SortDefinition<TDocument> sort);
+        IFindFluent<TDocument, TProjection> Sort(SortDefinition<TDocument> sort);
     }
 
     /// <summary>
     /// Fluent interface for find.
     /// </summary>
     /// <typeparam name="TDocument">The type of the document.</typeparam>
-    /// <typeparam name="TResult">The type of the result.</typeparam>
-    public interface IOrderedFindFluent<TDocument, TResult> : IFindFluent<TDocument, TResult>
+    /// <typeparam name="TProjection">The type of the projection (same as TDocument if there is no projection).</typeparam>
+    public interface IOrderedFindFluent<TDocument, TProjection> : IFindFluent<TDocument, TProjection>
     {
     }
 }

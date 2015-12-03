@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -36,7 +36,8 @@ namespace MongoDB.Driver.Tests
             _server = LegacyTestConfiguration.Server;
             _primary = LegacyTestConfiguration.Server.Primary;
             _database = LegacyTestConfiguration.Database;
-            _database.Drop();
+            // TODO: DropDatabase
+            //_database.Drop();
         }
 
         // TODO: more tests for MongoDatabase
@@ -72,6 +73,25 @@ namespace MongoDB.Driver.Tests
         }
 
         [Test]
+        [RequiresServer(MinimumVersion = "3.2.0-rc0")]
+        public void TestCreateCollectionSetIndexOptionDefaults()
+        {
+            var collection = _database.GetCollection("testindexoptiondefaults");
+            collection.Drop();
+            Assert.IsFalse(collection.Exists());
+            var storageEngineOptions = new BsonDocument("mmapv1", new BsonDocument());
+            var indexOptionDefaults = new IndexOptionDefaults { StorageEngine = storageEngineOptions };
+            var expectedIndexOptionDefaultsDocument = new BsonDocument("storageEngine", storageEngineOptions);
+            var options = CollectionOptions.SetIndexOptionDefaults(indexOptionDefaults);
+
+            _database.CreateCollection(collection.Name, options);
+
+            var commandResult = _database.RunCommand("listCollections");
+            var collectionInfo = commandResult.Response["cursor"]["firstBatch"].AsBsonArray.Where(doc => doc["name"] == collection.Name).Single().AsBsonDocument;
+            Assert.AreEqual(expectedIndexOptionDefaultsDocument, collectionInfo["options"]["indexOptionDefaults"]);
+        }
+
+        [Test]
         [RequiresServer(MinimumVersion = "2.7.0")]
         public void TestCreateCollectionSetStorageEngine()
         {
@@ -89,6 +109,27 @@ namespace MongoDB.Driver.Tests
             var result = _database.RunCommand("listCollections");
             var resultCollection = result.Response["cursor"]["firstBatch"].AsBsonArray.Where(doc => doc["name"] == collection.Name).Single();
             Assert.AreEqual(storageEngineOptions, resultCollection["options"]["storageEngine"]);
+        }
+
+        [Test]
+        [RequiresServer(MinimumVersion = "3.2.0-rc0")]
+        public void TestCreateCollectionSetValidator()
+        {
+            var collection = _database.GetCollection("testvalidation");
+            collection.Drop();
+            Assert.IsFalse(collection.Exists());
+            var options = CollectionOptions
+                .SetValidator(new QueryDocument("_id", new BsonDocument("$exists", true)))
+                .SetValidationAction(DocumentValidationAction.Error)
+                .SetValidationLevel(DocumentValidationLevel.Strict);
+
+            _database.CreateCollection(collection.Name, options);
+
+            var commandResult = _database.RunCommand("listCollections");
+            var collectionInfo = commandResult.Response["cursor"]["firstBatch"].AsBsonArray.Where(c => c["name"] == collection.Name).Single();
+            Assert.That(collectionInfo["options"]["validator"], Is.EqualTo(new BsonDocument("_id", new BsonDocument("$exists", true))));
+            Assert.That(collectionInfo["options"]["validationAction"].AsString, Is.EqualTo("error"));
+            Assert.That(collectionInfo["options"]["validationLevel"].AsString, Is.EqualTo("strict"));
         }
 
         [Test]
@@ -251,12 +292,23 @@ namespace MongoDB.Driver.Tests
         [Test]
         public void TestGetCollectionNames()
         {
-            _database.Drop();
-            _database.GetCollection("a").Insert(new BsonDocument("a", 1));
-            _database.GetCollection("b").Insert(new BsonDocument("b", 1));
-            _database.GetCollection("c").Insert(new BsonDocument("c", 1));
-            var collectionNames = _database.GetCollectionNames();
+            var databaseNamespace = CoreTestConfiguration.GetDatabaseNamespaceForTestFixture();
+            var database = _server.GetDatabase(databaseNamespace.DatabaseName);
+            database.Drop();
+            database.GetCollection("a").Insert(new BsonDocument("a", 1));
+            database.GetCollection("b").Insert(new BsonDocument("b", 1));
+            database.GetCollection("c").Insert(new BsonDocument("c", 1));
+            var collectionNames = database.GetCollectionNames();
             Assert.AreEqual(new[] { "a", "b", "c" }, collectionNames.Where(n => n != "system.indexes"));
+        }
+
+        [Test]
+        [RequiresServer(ClusterTypes = ClusterTypes.StandaloneOrReplicaSet)]
+        public void TestGetCurrentOp()
+        {
+            var adminDatabase = _server.GetDatabase("admin");
+            var currentOp = adminDatabase.GetCurrentOp();
+            Assert.AreEqual("inprog", currentOp.GetElement(0).Name);
         }
 
         [Test]

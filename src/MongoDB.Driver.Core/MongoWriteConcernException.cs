@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -42,7 +42,7 @@ namespace MongoDB.Driver
         public MongoWriteConcernException(ConnectionId connectionId, string message, WriteConcernResult writeConcernResult)
             : base(connectionId, message, null, writeConcernResult.Response)
         {
-            _writeConcernResult = Ensure.IsNotNull(writeConcernResult, "writeConcernResult");
+            _writeConcernResult = Ensure.IsNotNull(writeConcernResult, nameof(writeConcernResult));
         }
 
         /// <summary>

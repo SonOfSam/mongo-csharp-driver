@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -29,13 +29,13 @@ namespace MongoDB.Driver.Tests
             var settings = new MongoDatabaseSettings
             {
                 GuidRepresentation = GuidRepresentation.PythonLegacy,
-                OperationTimeout = TimeSpan.FromMilliseconds(20),
+                ReadConcern = ReadConcern.Majority,
                 ReadPreference = ReadPreference.Primary,
                 WriteConcern = WriteConcern.Acknowledged
             };
 
             Assert.AreEqual(GuidRepresentation.PythonLegacy, settings.GuidRepresentation);
-            Assert.AreEqual(TimeSpan.FromMilliseconds(20), settings.OperationTimeout);
+            Assert.AreEqual(ReadConcern.Majority, settings.ReadConcern);
             Assert.AreSame(ReadPreference.Primary, settings.ReadPreference);
             Assert.AreSame(WriteConcern.Acknowledged, settings.WriteConcern);
         }
@@ -47,7 +47,7 @@ namespace MongoDB.Driver.Tests
             var settings = new MongoDatabaseSettings
             {
                 GuidRepresentation = GuidRepresentation.PythonLegacy,
-                OperationTimeout = TimeSpan.FromMilliseconds(20),
+                ReadConcern = ReadConcern.Majority,
                 ReadPreference = ReadPreference.Secondary,
                 WriteConcern = WriteConcern.W2
             };
@@ -60,7 +60,7 @@ namespace MongoDB.Driver.Tests
         {
             var settings = new MongoDatabaseSettings();
             Assert.AreEqual(GuidRepresentation.Unspecified, settings.GuidRepresentation);
-            Assert.AreEqual(default(TimeSpan), settings.OperationTimeout);
+            Assert.AreEqual(null, settings.ReadConcern);
             Assert.AreEqual(null, settings.ReadPreference);
             Assert.AreEqual(null, settings.WriteConcern);
         }
@@ -81,7 +81,7 @@ namespace MongoDB.Driver.Tests
             Assert.IsFalse(clone.Equals(settings));
 
             clone = settings.Clone();
-            clone.OperationTimeout = TimeSpan.FromMilliseconds(20);
+            clone.ReadConcern = ReadConcern.Majority;
             Assert.IsFalse(clone.Equals(settings));
 
             clone = settings.Clone();
@@ -142,18 +142,18 @@ namespace MongoDB.Driver.Tests
         }
 
         [Test]
-        public void TestOperationTimeout()
+        public void TestReadConcern()
         {
             var settings = new MongoDatabaseSettings();
-            Assert.AreEqual(default(TimeSpan), settings.OperationTimeout);
+            Assert.AreEqual(null, settings.ReadConcern);
 
-            var operationTimeout = new TimeSpan(1, 2, 3);
-            settings.OperationTimeout = operationTimeout;
-            Assert.AreEqual(operationTimeout, settings.OperationTimeout);
+            var readConcern = ReadConcern.Majority;
+            settings.ReadConcern = readConcern;
+            Assert.AreEqual(readConcern, settings.ReadConcern);
 
             settings.Freeze();
-            Assert.AreEqual(operationTimeout, settings.OperationTimeout);
-            Assert.Throws<InvalidOperationException>(() => { settings.OperationTimeout = operationTimeout; });
+            Assert.AreEqual(readConcern, settings.ReadConcern);
+            Assert.Throws<InvalidOperationException>(() => { settings.ReadConcern = readConcern; });
         }
 
         [Test]

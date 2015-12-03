@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -27,12 +27,27 @@ namespace MongoDB.Driver.Core.Bindings
     public interface IChannelSource : IDisposable
     {
         /// <summary>
+        /// Gets the server.
+        /// </summary>
+        /// <value>
+        /// The server.
+        /// </value>
+        IServer Server{ get; }
+
+        /// <summary>
         /// Gets the server description.
         /// </summary>
         /// <value>
         /// The server description.
         /// </value>
         ServerDescription ServerDescription { get; }
+
+        /// <summary>
+        /// Gets a channel.
+        /// </summary>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>A channel.</returns>
+        IChannelHandle GetChannel(CancellationToken cancellationToken);
 
         /// <summary>
         /// Gets a channel.

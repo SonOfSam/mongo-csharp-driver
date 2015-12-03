@@ -1,4 +1,19 @@
-﻿using System;
+﻿/* Copyright 2015 MongoDB Inc.
+*
+* Licensed under the Apache License, Version 2.0 (the "License");
+* you may not use this file except in compliance with the License.
+* You may obtain a copy of the License at
+*
+* http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+*/
+
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
@@ -60,8 +75,8 @@ namespace MongoDB.Driver.Core.Authentication
 
             public ScramSha1Mechanism(UsernamePasswordCredential credential, IRandomStringGenerator randomStringGenerator)
             {
-                _credential = Ensure.IsNotNull(credential, "credential");
-                _randomStringGenerator = Ensure.IsNotNull(randomStringGenerator, "randomStringGenerator");
+                _credential = Ensure.IsNotNull(credential, nameof(credential));
+                _randomStringGenerator = Ensure.IsNotNull(randomStringGenerator, nameof(randomStringGenerator));
             }
 
             public string Name
@@ -71,8 +86,8 @@ namespace MongoDB.Driver.Core.Authentication
 
             public ISaslStep Initialize(IConnection connection, ConnectionDescription description)
             {
-                Ensure.IsNotNull(connection, "connection");
-                Ensure.IsNotNull(description, "description");
+                Ensure.IsNotNull(connection, nameof(connection));
+                Ensure.IsNotNull(description, nameof(description));
 
                 const string gs2Header = "n,,";
                 var username = "n=" + PrepUsername(_credential.Username);
@@ -162,7 +177,7 @@ namespace MongoDB.Driver.Core.Authentication
                 var proof = "p=" + Convert.ToBase64String(clientProof);
                 var clientFinalMessage = clientFinalMessageWithoutProof + "," + proof;
 
-                return new ClientLast(encoding.GetBytes(clientFinalMessage), Convert.ToBase64String(serverSignature));
+                return new ClientLast(encoding.GetBytes(clientFinalMessage), serverSignature);
             }
 
             private static byte[] XOR(byte[] a, byte[] b)
@@ -204,9 +219,9 @@ namespace MongoDB.Driver.Core.Authentication
         private class ClientLast : ISaslStep
         {
             private readonly byte[] _bytesToSendToServer;
-            private readonly string _serverSignature64;
+            private readonly byte[] _serverSignature64;
 
-            public ClientLast(byte[] bytesToSendToServer, string serverSignature64)
+            public ClientLast(byte[] bytesToSendToServer, byte[] serverSignature64)
             {
                 _bytesToSendToServer = bytesToSendToServer;
                 _serverSignature64 = serverSignature64;
@@ -226,15 +241,25 @@ namespace MongoDB.Driver.Core.Authentication
             {
                 var encoding = Utf8Encodings.Strict;
                 var map = NVParser.Parse(encoding.GetString(bytesReceivedFromServer));
+                var serverSignature = Convert.FromBase64String(map['v']);
 
-                var serverSignature = map['v'];
-
-                if (_serverSignature64 != serverSignature)
+                if (!ConstantTimeEquals(_serverSignature64, serverSignature))
                 {
                     throw new MongoAuthenticationException(conversation.ConnectionId, message: "Server signature was invalid.");
                 }
 
                 return new CompletedStep();
+            }
+
+            private bool ConstantTimeEquals(byte[] a, byte[] b)
+            {
+                var diff = a.Length ^ b.Length;
+                for (var i = 0; i < a.Length && i < b.Length; i++)
+                {
+                    diff |= a[i] ^ b[i];
+                }
+
+                return diff == 0;
             }
         }
 

@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using MongoDB.Driver.Core.Bindings;
 using MongoDB.Driver.Core.Connections;
+using MongoDB.Driver.Core.Events;
 using MongoDB.Driver.Core.Misc;
 using MongoDB.Driver.Core.Operations.ElementNameValidators;
 using MongoDB.Driver.Core.WireProtocol;
@@ -31,6 +32,7 @@ namespace MongoDB.Driver.Core.Operations
     public class UpdateOpcodeOperation : IWriteOperation<WriteConcernResult>
     {
         // fields
+        private bool? _bypassDocumentValidation;
         private readonly CollectionNamespace _collectionNamespace;
         private int? _maxDocumentSize;
         private readonly MessageEncoderSettings _messageEncoderSettings;
@@ -49,12 +51,24 @@ namespace MongoDB.Driver.Core.Operations
             UpdateRequest request,
             MessageEncoderSettings messageEncoderSettings)
         {
-            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, "collectionNamespace");
-            _request = Ensure.IsNotNull(request, "request");
-            _messageEncoderSettings = Ensure.IsNotNull(messageEncoderSettings, "messageEncoderSettings");
+            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, nameof(collectionNamespace));
+            _request = Ensure.IsNotNull(request, nameof(request));
+            _messageEncoderSettings = Ensure.IsNotNull(messageEncoderSettings, nameof(messageEncoderSettings));
         }
 
         // properties
+        /// <summary>
+        /// Gets or sets a value indicating whether to bypass document validation.
+        /// </summary>
+        /// <value>
+        /// A value indicating whether to bypass document validation.
+        /// </value>
+        public bool? BypassDocumentValidation
+        {
+            get { return _bypassDocumentValidation; }
+            set { _bypassDocumentValidation = value; }
+        }
+
         /// <summary>
         /// Gets the collection namespace.
         /// </summary>
@@ -75,7 +89,7 @@ namespace MongoDB.Driver.Core.Operations
         public int? MaxDocumentSize
         {
             get { return _maxDocumentSize; }
-            set { _maxDocumentSize = Ensure.IsNullOrGreaterThanZero(value, "value"); }
+            set { _maxDocumentSize = Ensure.IsNullOrGreaterThanZero(value, nameof(value)); }
         }
 
         /// <summary>
@@ -109,10 +123,77 @@ namespace MongoDB.Driver.Core.Operations
         public WriteConcern WriteConcern
         {
             get { return _writeConcern; }
-            set { _writeConcern = Ensure.IsNotNull(value, "value"); }
+            set { _writeConcern = Ensure.IsNotNull(value, nameof(value)); }
         }
 
-        // methods
+        // public methods
+        /// <inheritdoc/>
+        public WriteConcernResult Execute(IWriteBinding binding, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNull(binding, nameof(binding));
+
+            using (EventContext.BeginOperation())
+            using (var channelSource = binding.GetWriteChannelSource(cancellationToken))
+            using (var channel = channelSource.GetChannel(cancellationToken))
+            {
+                if (SupportedFeatures.AreWriteCommandsSupported(channel.ConnectionDescription.ServerVersion) && _writeConcern.IsAcknowledged)
+                {
+                    var emulator = CreateEmulator();
+                    return emulator.Execute(channel, cancellationToken);
+                }
+                else
+                {
+                    return ExecuteProtocol(channel, cancellationToken);
+                }
+            }
+        }
+
+        /// <inheritdoc/>
+        public async Task<WriteConcernResult> ExecuteAsync(IWriteBinding binding, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNull(binding, nameof(binding));
+
+            using (EventContext.BeginOperation())
+            using (var channelSource = await binding.GetWriteChannelSourceAsync(cancellationToken).ConfigureAwait(false))
+            using (var channel = await channelSource.GetChannelAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (SupportedFeatures.AreWriteCommandsSupported(channel.ConnectionDescription.ServerVersion) && _writeConcern.IsAcknowledged)
+                {
+                    var emulator = CreateEmulator();
+                    return await emulator.ExecuteAsync(channel, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    return await ExecuteProtocolAsync(channel, cancellationToken).ConfigureAwait(false);
+                }
+            }
+        }
+
+        // private methods
+        private UpdateOpcodeOperationEmulator CreateEmulator()
+        {
+            return new UpdateOpcodeOperationEmulator(_collectionNamespace, _request, _messageEncoderSettings)
+            {
+                BypassDocumentValidation = _bypassDocumentValidation,
+                MaxDocumentSize = _maxDocumentSize,
+                WriteConcern = _writeConcern
+            };
+        }
+
+        private WriteConcernResult ExecuteProtocol(IChannelHandle channel, CancellationToken cancellationToken)
+        {
+            return channel.Update(
+                _collectionNamespace,
+                _messageEncoderSettings,
+                _writeConcern,
+                _request.Filter,
+                _request.Update,
+                ElementNameValidatorFactory.ForUpdateType(_request.UpdateType),
+                _request.IsMulti,
+                _request.IsUpsert,
+                cancellationToken);
+        }
+
         private Task<WriteConcernResult> ExecuteProtocolAsync(IChannelHandle channel, CancellationToken cancellationToken)
         {
             return channel.UpdateAsync(
@@ -125,37 +206,6 @@ namespace MongoDB.Driver.Core.Operations
                 _request.IsMulti,
                 _request.IsUpsert,
                 cancellationToken);
-        }
-
-        private async Task<WriteConcernResult> ExecuteAsync(IChannelHandle channel, CancellationToken cancellationToken)
-        {
-            Ensure.IsNotNull(channel, "channel");
-
-            if (channel.ConnectionDescription.BuildInfoResult.ServerVersion >= new SemanticVersion(2, 6, 0) && _writeConcern.IsAcknowledged)
-            {
-                var emulator = new UpdateOpcodeOperationEmulator(_collectionNamespace, _request, _messageEncoderSettings)
-                {
-                    MaxDocumentSize = _maxDocumentSize,
-                    WriteConcern = _writeConcern
-                };
-                return await emulator.ExecuteAsync(channel, cancellationToken).ConfigureAwait(false);
-            }
-            else
-            {
-                return await ExecuteProtocolAsync(channel, cancellationToken).ConfigureAwait(false);
-            }
-        }
-
-        /// <inheritdoc/>
-        public async Task<WriteConcernResult> ExecuteAsync(IWriteBinding binding, CancellationToken cancellationToken)
-        {
-            Ensure.IsNotNull(binding, "binding");
-
-            using (var channelSource = await binding.GetWriteChannelSourceAsync(cancellationToken).ConfigureAwait(false))
-            using (var channel = await channelSource.GetChannelAsync(cancellationToken).ConfigureAwait(false))
-            {
-                return await ExecuteAsync(channel, cancellationToken).ConfigureAwait(false);
-            }
         }
     }
 }

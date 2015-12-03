@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -57,6 +57,12 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages.Encoders.BinaryEncoders
         /// <returns>A message.</returns>
         public DeleteMessage ReadMessage()
         {
+            return ReadMessage(BsonDocumentSerializer.Instance);
+        }
+
+        internal DeleteMessage ReadMessage<TDocument>(IBsonSerializer<TDocument> serializer)
+            where TDocument : BsonDocument
+        {
             var binaryReader = CreateBinaryReader();
             var stream = binaryReader.BsonStream;
 
@@ -68,7 +74,7 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages.Encoders.BinaryEncoders
             var fullCollectionName = stream.ReadCString(Encoding);
             var flags = (DeleteFlags)stream.ReadInt32();
             var context = BsonDeserializationContext.CreateRoot(binaryReader);
-            var query = BsonDocumentSerializer.Instance.Deserialize(context);
+            var query = serializer.Deserialize(context);
 
             var isMulti = (flags & DeleteFlags.Single) != DeleteFlags.Single;
 
@@ -85,7 +91,7 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages.Encoders.BinaryEncoders
         /// <param name="message">The message.</param>
         public void WriteMessage(DeleteMessage message)
         {
-            Ensure.IsNotNull(message, "message");
+            Ensure.IsNotNull(message, nameof(message));
 
             var binaryWriter = CreateBinaryWriter();
             var stream = binaryWriter.BsonStream;

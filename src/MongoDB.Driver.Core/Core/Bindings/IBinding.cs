@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -38,6 +38,13 @@ namespace MongoDB.Driver.Core.Bindings
         /// </summary>
         /// <param name="cancellationToken">The cancellation token.</param>
         /// <returns>A channel source.</returns>
+        IChannelSourceHandle GetReadChannelSource(CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Gets a channel source for read operations.
+        /// </summary>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>A channel source.</returns>
         Task<IChannelSourceHandle> GetReadChannelSourceAsync(CancellationToken cancellationToken);
     }
 
@@ -46,6 +53,13 @@ namespace MongoDB.Driver.Core.Bindings
     /// </summary>
     public interface IWriteBinding : IDisposable
     {
+        /// <summary>
+        /// Gets a channel source for write operations.
+        /// </summary>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>A channel source.</returns>
+        IChannelSourceHandle GetWriteChannelSource(CancellationToken cancellationToken);
+
         /// <summary>
         /// Gets a channel source for write operations.
         /// </summary>

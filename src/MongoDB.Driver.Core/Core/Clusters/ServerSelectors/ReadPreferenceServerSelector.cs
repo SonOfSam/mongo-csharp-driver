@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -54,13 +54,18 @@ namespace MongoDB.Driver.Core.Clusters.ServerSelectors
         /// <param name="readPreference">The read preference.</param>
         public ReadPreferenceServerSelector(ReadPreference readPreference)
         {
-            _readPreference = Ensure.IsNotNull(readPreference, "readPreference");
+            _readPreference = Ensure.IsNotNull(readPreference, nameof(readPreference));
         }
 
         // methods
         /// <inheritdoc/>
         public IEnumerable<ServerDescription> SelectServers(ClusterDescription cluster, IEnumerable<ServerDescription> servers)
         {
+            if (cluster.ConnectionMode == ClusterConnectionMode.Direct)
+            {
+                return servers;
+            }
+
             switch (cluster.Type)
             {
                 case ClusterType.ReplicaSet: return SelectForReplicaSet(servers);
@@ -82,7 +87,7 @@ namespace MongoDB.Driver.Core.Clusters.ServerSelectors
         private IEnumerable<ServerDescription> SelectByTagSets(IEnumerable<ServerDescription> servers)
         {
             var tagSets = _readPreference.TagSets;
-            if(tagSets == null || !tagSets.Any())
+            if (tagSets == null || !tagSets.Any())
             {
                 return servers;
             }

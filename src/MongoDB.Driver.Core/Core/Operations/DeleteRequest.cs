@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -35,7 +35,7 @@ namespace MongoDB.Driver.Core.Operations
         public DeleteRequest(BsonDocument filter)
             : base(WriteRequestType.Delete)
         {
-            _filter = Ensure.IsNotNull(filter, "filter");
+            _filter = Ensure.IsNotNull(filter, nameof(filter));
             _limit = 1;
         }
 

@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ using System.Threading.Tasks;
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Serializers;
 using MongoDB.Driver.Core.Bindings;
+using MongoDB.Driver.Core.Events;
 using MongoDB.Driver.Core.Misc;
 using MongoDB.Driver.Core.WireProtocol.Messages.Encoders;
 
@@ -32,11 +33,6 @@ namespace MongoDB.Driver.Core.Operations
     /// </summary>
     public class CreateIndexesOperation : IWriteOperation<BsonDocument>
     {
-        #region static
-        // static fields
-        private static readonly SemanticVersion __serverVersionSupportingCreateIndexesCommand = new SemanticVersion(2, 7, 6);
-        #endregion
-
         // fields
         private readonly CollectionNamespace _collectionNamespace;
         private readonly MessageEncoderSettings _messageEncoderSettings;
@@ -55,9 +51,9 @@ namespace MongoDB.Driver.Core.Operations
             IEnumerable<CreateIndexRequest> requests,
             MessageEncoderSettings messageEncoderSettings)
         {
-            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, "collectionNamespace");
-            _requests = Ensure.IsNotNull(requests, "requests").ToList();
-            _messageEncoderSettings = Ensure.IsNotNull(messageEncoderSettings, "messageEncoderSettings");
+            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, nameof(collectionNamespace));
+            _requests = Ensure.IsNotNull(requests, nameof(requests)).ToList();
+            _messageEncoderSettings = Ensure.IsNotNull(messageEncoderSettings, nameof(messageEncoderSettings));
         }
 
         // properties
@@ -103,62 +99,47 @@ namespace MongoDB.Driver.Core.Operations
         public WriteConcern WriteConcern
         {
             get { return _writeConcern; }
-            set { _writeConcern = Ensure.IsNotNull(value, "value"); }
+            set { _writeConcern = Ensure.IsNotNull(value, nameof(value)); }
         }
 
-        // methods
-        internal BsonDocument CreateCommand()
+        // public methods
+        /// <inheritdoc/>
+        public BsonDocument Execute(IWriteBinding binding, CancellationToken cancellationToken)
         {
-            return new BsonDocument
+            using (EventContext.BeginOperation())
+            using (var channelSource = binding.GetWriteChannelSource(cancellationToken))
+            using (var channel = channelSource.GetChannel(cancellationToken))
+            using (var channelBinding = new ChannelReadWriteBinding(channelSource.Server, channel))
             {
-                { "createIndexes", _collectionNamespace.CollectionName },
-                { "indexes", new BsonArray(_requests.Select(request => request.CreateIndexDocument())) }
-            };
+                var operation = CreateOperation(channel);
+                return operation.Execute(channelBinding, cancellationToken);
+            }
         }
 
         /// <inheritdoc/>
         public async Task<BsonDocument> ExecuteAsync(IWriteBinding binding, CancellationToken cancellationToken)
         {
+            using (EventContext.BeginOperation())
             using (var channelSource = await binding.GetWriteChannelSourceAsync(cancellationToken).ConfigureAwait(false))
+            using (var channel = await channelSource.GetChannelAsync(cancellationToken).ConfigureAwait(false))
+            using (var channelBinding = new ChannelReadWriteBinding(channelSource.Server, channel))
             {
-                if (channelSource.ServerDescription.Version >= __serverVersionSupportingCreateIndexesCommand)
-                {
-                    return await ExecuteUsingCommandAsync(channelSource, cancellationToken).ConfigureAwait(false);
-                }
-                else
-                {
-                    return await ExecuteUsingInsertAsync(channelSource, cancellationToken).ConfigureAwait(false);
-                }
+                var operation = CreateOperation(channel);
+                return await operation.ExecuteAsync(channelBinding, cancellationToken).ConfigureAwait(false);
             }
         }
 
-        private Task<BsonDocument> ExecuteUsingCommandAsync(IChannelSourceHandle channelSource, CancellationToken cancellationToken)
+        // private methods
+        private IWriteOperation<BsonDocument> CreateOperation(IChannel channel)
         {
-            var databaseNamespace = _collectionNamespace.DatabaseNamespace;
-            var command = CreateCommand();
-            var resultSerializer = BsonDocumentSerializer.Instance;
-            var operation = new WriteCommandOperation<BsonDocument>(databaseNamespace, command, resultSerializer, _messageEncoderSettings);
-            return operation.ExecuteAsync(channelSource, cancellationToken);
-        }
-
-        private async Task<BsonDocument> ExecuteUsingInsertAsync(IChannelSourceHandle channelSource, CancellationToken cancellationToken)
-        {
-            var systemIndexesCollection = _collectionNamespace.DatabaseNamespace.SystemIndexesCollection;
-
-            foreach (var createIndexRequest in _requests)
+            if (SupportedFeatures.IsCreateIndexesCommandSupported(channel.ConnectionDescription.ServerVersion))
             {
-                var document = createIndexRequest.CreateIndexDocument();
-                document.InsertAt(0, new BsonElement("ns", _collectionNamespace.FullName));
-                var documentSource = new BatchableSource<BsonDocument>(new[] { document });
-                var operation = new InsertOpcodeOperation<BsonDocument>(
-                    systemIndexesCollection,
-                    documentSource,
-                    BsonDocumentSerializer.Instance,
-                    _messageEncoderSettings);
-                await operation.ExecuteAsync(channelSource, cancellationToken).ConfigureAwait(false);
+                return new CreateIndexesUsingCommandOperation(_collectionNamespace, _requests, _messageEncoderSettings);
             }
-
-            return new BsonDocument("ok", 1);
+            else
+            {
+                return new CreateIndexesUsingInsertOperation(_collectionNamespace, _requests, _messageEncoderSettings);
+            }
         }
-    }
+   }
 }

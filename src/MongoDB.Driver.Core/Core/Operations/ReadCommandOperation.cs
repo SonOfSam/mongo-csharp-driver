@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ using System.Threading.Tasks;
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization;
 using MongoDB.Driver.Core.Bindings;
+using MongoDB.Driver.Core.Events;
 using MongoDB.Driver.Core.Misc;
 using MongoDB.Driver.Core.WireProtocol.Messages.Encoders;
 
@@ -52,10 +53,23 @@ namespace MongoDB.Driver.Core.Operations
 
         // methods        
         /// <inheritdoc/>
+        public TCommandResult Execute(IReadBinding binding, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNull(binding, nameof(binding));
+
+            using (EventContext.BeginOperation())
+            using (var channelSource = binding.GetReadChannelSource(cancellationToken))
+            {
+                return ExecuteProtocol(channelSource, binding.ReadPreference, cancellationToken);
+            }
+        }
+
+        /// <inheritdoc/>
         public async Task<TCommandResult> ExecuteAsync(IReadBinding binding, CancellationToken cancellationToken)
         {
-            Ensure.IsNotNull(binding, "binding");
+            Ensure.IsNotNull(binding, nameof(binding));
 
+            using (EventContext.BeginOperation())
             using (var channelSource = await binding.GetReadChannelSourceAsync(cancellationToken).ConfigureAwait(false))
             {
                 return await ExecuteProtocolAsync(channelSource, binding.ReadPreference, cancellationToken).ConfigureAwait(false);

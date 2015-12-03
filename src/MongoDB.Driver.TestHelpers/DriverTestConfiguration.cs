@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -14,7 +14,10 @@
 */
 
 using System;
+using System.Diagnostics;
 using MongoDB.Bson;
+using MongoDB.Driver.Core.Configuration;
+using MongoDB.Driver.Core.Events.Diagnostics;
 
 namespace MongoDB.Driver.Tests
 {
@@ -24,7 +27,7 @@ namespace MongoDB.Driver.Tests
     public static class DriverTestConfiguration
     {
         // private static fields
-        private static MongoClient __client;
+        private static Lazy<MongoClient> __client;
         private static CollectionNamespace __collectionNamespace;
         private static DatabaseNamespace __databaseNamespace;
 
@@ -32,16 +35,18 @@ namespace MongoDB.Driver.Tests
         static DriverTestConfiguration()
         {
             var connectionString = CoreTestConfiguration.ConnectionString.ToString();
+            var clientSettings = MongoClientSettings.FromUrl(new MongoUrl(connectionString));
 
-            var mongoUrl = new MongoUrl(connectionString);
-            var clientSettings = MongoClientSettings.FromUrl(mongoUrl);
-            if (!clientSettings.WriteConcern.IsAcknowledged)
+            var serverSelectionTimeoutString = Environment.GetEnvironmentVariable("MONGO_SERVER_SELECTION_TIMEOUT_MS");
+            if (serverSelectionTimeoutString == null)
             {
-                clientSettings.WriteConcern = WriteConcern.Acknowledged; // ensure WriteConcern is enabled regardless of what the URL says
+                serverSelectionTimeoutString = "30000";
             }
+            clientSettings.ServerSelectionTimeout = TimeSpan.FromMilliseconds(int.Parse(serverSelectionTimeoutString));
+            clientSettings.ClusterConfigurator = cb => CoreTestConfiguration.ConfigureLogging(cb);
 
-            __client = new MongoClient(clientSettings);
-            __databaseNamespace = mongoUrl.DatabaseName == null ? CoreTestConfiguration.DatabaseNamespace : new DatabaseNamespace(mongoUrl.DatabaseName);
+            __client = new Lazy<MongoClient>(() => new MongoClient(clientSettings), true);
+            __databaseNamespace = CoreTestConfiguration.DatabaseNamespace;
             __collectionNamespace = new CollectionNamespace(__databaseNamespace, "testcollection");
         }
 
@@ -51,7 +56,7 @@ namespace MongoDB.Driver.Tests
         /// </summary>
         public static MongoClient Client
         {
-            get { return __client; }
+            get { return __client.Value; }
         }
 
         /// <summary>

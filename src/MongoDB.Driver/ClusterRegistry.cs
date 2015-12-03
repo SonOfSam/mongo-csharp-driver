@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Security;
+using System.Net.Sockets;
 using System.Security.Cryptography.X509Certificates;
 using MongoDB.Driver.Core.Authentication;
 using MongoDB.Driver.Core.Clusters;
@@ -79,11 +80,13 @@ namespace MongoDB.Driver
 
         private ClusterSettings ConfigureCluster(ClusterSettings settings, ClusterKey clusterKey)
         {
-            var endPoints = clusterKey.Servers.Select(s => (EndPoint)new DnsEndPoint(s.Host, s.Port));
+            var endPoints = clusterKey.Servers.Select(s => EndPointHelper.Parse(s.ToString()));
             return settings.With(
                 connectionMode: clusterKey.ConnectionMode.ToCore(),
-                endPoints: Optional.Create(endPoints),
+                endPoints: Optional.Enumerable(endPoints),
                 replicaSetName: clusterKey.ReplicaSetName,
+                maxServerSelectionWaitQueueSize: clusterKey.WaitQueueSize,
+                serverSelectionTimeout: clusterKey.ServerSelectionTimeout,
                 postServerSelector: new LatencyLimitingServerSelector(clusterKey.LocalThreshold));
         }
 
@@ -101,7 +104,7 @@ namespace MongoDB.Driver
         {
             var authenticators = clusterKey.Credentials.Select(c => c.ToAuthenticator());
             return settings.With(
-                authenticators: Optional.Create(authenticators),
+                authenticators: Optional.Enumerable(authenticators),
                 maxIdleTime: clusterKey.MaxConnectionIdleTime,
                 maxLifeTime: clusterKey.MaxConnectionLifeTime);
         }
@@ -126,7 +129,7 @@ namespace MongoDB.Driver
                 }
 
                 return settings.With(
-                    clientCertificates: Optional.Create(sslSettings.ClientCertificates ?? Enumerable.Empty<X509Certificate>()),
+                    clientCertificates: Optional.Enumerable(sslSettings.ClientCertificates ?? Enumerable.Empty<X509Certificate>()),
                     checkCertificateRevocation: sslSettings.CheckCertificateRevocation,
                     clientCertificateSelectionCallback: sslSettings.ClientCertificateSelectionCallback,
                     enabledProtocols: sslSettings.EnabledSslProtocols,
@@ -138,6 +141,11 @@ namespace MongoDB.Driver
 
         private TcpStreamSettings ConfigureTcp(TcpStreamSettings settings, ClusterKey clusterKey)
         {
+            if (clusterKey.IPv6)
+            {
+                settings = settings.With(addressFamily: AddressFamily.InterNetworkV6);
+            }
+
             return settings.With(
                 connectTimeout: clusterKey.ConnectTimeout,
                 readTimeout: clusterKey.SocketTimeout,

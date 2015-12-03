@@ -1,28 +1,64 @@
-﻿using System;
+﻿/* Copyright 2015 MongoDB Inc.
+*
+* Licensed under the Apache License, Version 2.0 (the "License");
+* you may not use this file except in compliance with the License.
+* You may obtain a copy of the License at
+*
+* http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+*/
+
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
-using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using FluentAssertions;
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization;
-using MongoDB.Driver.Linq.Translators;
-using FluentAssertions;
-using NUnit.Framework;
-using System.Text.RegularExpressions;
 using MongoDB.Driver.Core;
+using MongoDB.Driver.Linq.Translators;
+using NUnit.Framework;
 
 namespace MongoDB.Driver.Tests.Linq.Translators
 {
     [TestFixture]
-    public class PredicateTranslatorTests : TranslatorTestBase
+    public class PredicateTranslatorTests : IntegrationTestBase
     {
+        [Test]
+        public void All()
+        {
+            var local = new[] { "itchy" };
+
+            Assert(
+                x => local.All(i => x.C.E.I.Contains(i)),
+                1,
+                "{'C.E.I': { $all: [ 'itchy' ] } }");
+        }
+
+        [Test]
+        public void All_with_a_not()
+        {
+            var local = new[] { "itchy" };
+
+            Assert(
+                x => !local.All(i => x.C.E.I.Contains(i)),
+                1,
+                "{'C.E.I': { $not: { $all: [ 'itchy' ] } } }");
+        }
+
         [Test]
         public void Any_without_a_predicate()
         {
             Assert(
                 x => x.G.Any(),
-                1,
+                2,
                 "{G: {$ne: null, $not: {$size: 0}}}");
         }
 
@@ -30,22 +66,55 @@ namespace MongoDB.Driver.Tests.Linq.Translators
         public void Any_with_a_predicate_on_documents()
         {
             Assert(
+                x => x.G.Any(g => g.D == "Don't"),
+                1,
+                "{\"G.D\": \"Don't\"}");
+
+            Assert(
                 x => x.G.Any(g => g.D == "Don't" && g.E.F == 33),
                 1,
                 "{G: {$elemMatch: {D: \"Don't\", 'E.F': 33}}}");
         }
 
         [Test]
+        public void Any_with_a_nested_Any()
+        {
+            Assert(
+                x => x.G.Any(g => g.S.Any()),
+                1,
+                "{G: {$elemMatch: {S: {$ne: null, $not: {$size: 0}}}}}");
+
+            Assert(
+                x => x.G.Any(g => g.S.Any(s => s.D == "Delilah")),
+                1,
+                "{\"G.S.D\": \"Delilah\"}");
+        }
+
+        [Test]
+        public void Any_with_a_not()
+        {
+            Assert(
+                x => x.G.Any(g => !g.S.Any()),
+                2,
+                "{G: {$elemMatch: {$nor: [{S: {$ne: null, $not: {$size: 0}}}]}}}");
+
+            Assert(
+                x => x.G.Any(g => !g.S.Any(s => s.D == "Delilah")),
+                1,
+                "{\"G.S.D\": {$ne: \"Delilah\"}}}");
+        }
+
+        [Test]
         public void Any_with_a_predicate_on_scalars_legacy()
         {
             Assert(
-                x => x.M.Any(m => m > 2),
+                x => x.M.Any(m => m > 5),
                 1,
-                "{M: {$elemMatch: {$gt: 2}}}");
+                "{M: {$gt: 5}}");
 
             Assert(
                 x => x.M.Any(m => m > 2 && m < 6),
-                1,
+                2,
                 "{M: {$elemMatch: {$gt: 2, $lt: 6}}}");
         }
 
@@ -54,14 +123,96 @@ namespace MongoDB.Driver.Tests.Linq.Translators
         public void Any_with_a_predicate_on_scalars()
         {
             Assert(
-                x => x.M.Any(m => m == 5),
-                1,
-                "{M: {$elemMatch: {$eq: 5}}}");
-
-            Assert(
                 x => x.C.E.I.Any(i => i.StartsWith("ick")),
                 1,
-                new BsonDocument("C.E.I", new BsonDocument("$elemMatch", new BsonDocument("$regex", new BsonRegularExpression("^ick", "s")))));
+                "{\"C.E.I\": /^ick/s}");
+
+            // this isn't a legal query, as in, there isn't any 
+            // way to render this legally for the server...
+            //Assert(
+            //    x => x.C.E.I.Any(i => i.StartsWith("ick") && i == "Jack"),
+            //    1,
+            //    new BsonDocument(
+            //        "C.E.I",
+            //        new BsonDocument(
+            //            "$elemMatch",
+            //            new BsonDocument
+            //            {
+            //                { "$regex", new BsonRegularExpression("^ick", "s") },
+            //                { "$eq", "Jack" }
+            //            })));
+        }
+
+        [Test]
+        public void Any_with_local_contains_on_an_embedded_document()
+        {
+            var local = new List<string> { "Delilah", "Dolphin" };
+
+            Assert(
+                x => x.G.Any(g => local.Contains(g.D)),
+                1,
+                "{\"G.D\": { $in: [\"Delilah\", \"Dolphin\" ] } }");
+        }
+
+        [Test]
+        public void Any_with_local_contains_on_a_scalar_array()
+        {
+            var local = new List<string> { "itchy" };
+
+            Assert(
+                x => local.Any(i => x.C.E.I.Contains(i)),
+                1,
+                "{\"C.E.I\": { $in: [\"itchy\" ] } }");
+        }
+
+        [Test]
+        [RequiresServer(MinimumVersion = "3.1.9")]
+        public void BitsAllClear_with_bitwise_operators()
+        {
+            Assert(
+                x => (x.C.E.F & 20) == 0,
+                1,
+                "{'C.E.F': { $bitsAllClear: 20 } }");
+        }
+
+        [Test]
+        [RequiresServer(MinimumVersion = "3.1.9")]
+        public void BitsAllSet_with_bitwise_operators()
+        {
+            Assert(
+                x => (x.C.E.F & 7) == 7,
+                1,
+                "{'C.E.F': { $bitsAllSet: 7 } }");
+        }
+
+        [Test]
+        [RequiresServer(MinimumVersion = "3.1.9")]
+        public void BitsAllSet_with_HasFlag()
+        {
+            Assert(
+                x => x.Q.HasFlag(Q.One),
+                1,
+                "{Q: { $bitsAllSet: 1 } }");
+        }
+
+        [Test]
+        [RequiresServer(MinimumVersion = "3.1.9")]
+        public void BitsAnyClear_with_bitwise_operators()
+        {
+            Assert(
+                x => (x.C.E.F & 7) != 7,
+                1,
+                "{'C.E.F': { $bitsAnyClear: 7 } }");
+        }
+
+        [Test]
+        [RequiresServer(MinimumVersion = "3.1.9")]
+        public void BitsAnySet_with_bitwise_operators()
+        {
+            Assert(
+                x => (x.C.E.F & 20) != 0,
+                1,
+                "{'C.E.F': { $bitsAnySet: 20 } }");
         }
 
         [Test]
@@ -71,7 +222,7 @@ namespace MongoDB.Driver.Tests.Linq.Translators
 
             Assert(
                 x => local.Contains(x.Id),
-                1,
+                2,
                 "{_id: {$in: [10, 20, 30]}}");
         }
 
@@ -82,7 +233,7 @@ namespace MongoDB.Driver.Tests.Linq.Translators
 
             Assert(
                 x => local.Contains(x.Id),
-                1,
+                2,
                 "{_id: {$in: [10, 20, 30]}}");
         }
 
@@ -93,7 +244,7 @@ namespace MongoDB.Driver.Tests.Linq.Translators
 
             Assert(
                 x => local.Contains(x.Id),
-                1,
+                2,
                 "{_id: {$in: [10, 20, 30]}}");
         }
 
@@ -102,12 +253,12 @@ namespace MongoDB.Driver.Tests.Linq.Translators
         {
             Assert(
                 x => x.M.Length == 3,
-                1,
+                2,
                 "{M: {$size: 3}}");
 
             Assert(
                 x => 3 == x.M.Length,
-                1,
+                2,
                 "{M: {$size: 3}}");
         }
 
@@ -134,7 +285,7 @@ namespace MongoDB.Driver.Tests.Linq.Translators
         {
             Assert(
                 x => !(x.M.Length != 3),
-                1,
+                2,
                 "{M: {$size: 3}}");
         }
 
@@ -152,7 +303,7 @@ namespace MongoDB.Driver.Tests.Linq.Translators
         {
             Assert(
                 x => x.M[1] != 4,
-                0,
+                1,
                 "{'M.1': {$ne: 4}}");
         }
 
@@ -206,7 +357,7 @@ namespace MongoDB.Driver.Tests.Linq.Translators
         {
             Assert(
                 x => x.K == false,
-                0,
+                1,
                 "{K: false}");
         }
 
@@ -215,7 +366,7 @@ namespace MongoDB.Driver.Tests.Linq.Translators
         {
             Assert(
                 x => x.K != true,
-                0,
+                1,
                 "{K: {$ne: true}}");
         }
 
@@ -233,7 +384,7 @@ namespace MongoDB.Driver.Tests.Linq.Translators
         {
             Assert(
                 x => !x.K,
-                0,
+                1,
                 "{K: {$ne: true}}");
         }
 
@@ -243,7 +394,7 @@ namespace MongoDB.Driver.Tests.Linq.Translators
             Assert(
                 x => x.C == new C { D = "Dexter" },
                 0,
-                "{C: {D: 'Dexter', E: null}}");
+                "{C: {D: 'Dexter', E: null, S: null}}");
         }
 
         [Test]
@@ -252,7 +403,7 @@ namespace MongoDB.Driver.Tests.Linq.Translators
             Assert(
                 x => x.C.Equals(new C { D = "Dexter" }),
                 0,
-                "{C: {D: 'Dexter', E: null}}");
+                "{C: {D: 'Dexter', E: null, S: null}}");
         }
 
         [Test]
@@ -260,10 +411,10 @@ namespace MongoDB.Driver.Tests.Linq.Translators
         {
             Assert(
                 x => x.C != new C { D = "Dexter" },
-                1,
-                "{C: {$ne: {D: 'Dexter', E: null}}}");
+                2,
+                "{C: {$ne: {D: 'Dexter', E: null, S: null}}}");
         }
-        
+
         [Test]
         public void ClassMemberEquals()
         {
@@ -278,8 +429,71 @@ namespace MongoDB.Driver.Tests.Linq.Translators
         {
             Assert(
                 x => x.C.D != "Dexter",
-                0,
+                1,
                 "{'C.D': {$ne: 'Dexter'}}");
+        }
+
+        [Test]
+        public void CompareTo_equal()
+        {
+            Assert(
+                x => x.A.CompareTo("Amazing") == 0,
+                1,
+                "{'A': 'Amazing' }");
+        }
+
+        [Test]
+        public void CompareTo_greater_than()
+        {
+            Assert(
+                x => x.A.CompareTo("Around") > 0,
+                1,
+                "{'A': { $gt: 'Around' } }");
+        }
+
+        [Test]
+        public void CompareTo_greater_than_or_equal()
+        {
+            Assert(
+                x => x.A.CompareTo("Around") >= 0,
+                1,
+                "{'A': { $gte: 'Around' } }");
+        }
+
+        [Test]
+        public void CompareTo_less_than()
+        {
+            Assert(
+                x => x.A.CompareTo("Around") < 0,
+                1,
+                "{'A': { $lt: 'Around' } }");
+        }
+
+        [Test]
+        public void CompareTo_less_than_or_equal()
+        {
+            Assert(
+                x => x.A.CompareTo("Around") <= 0,
+                1,
+                "{'A': { $lte: 'Around' } }");
+        }
+
+        [Test]
+        public void CompareTo_not_equal()
+        {
+            Assert(
+                x => x.A.CompareTo("Amazing") != 0,
+                1,
+                "{'A': { $ne: 'Amazing' } }");
+        }
+
+        [Test]
+        public void DictionaryIndexer()
+        {
+            Assert(
+                x => x.T["one"] == 1,
+                1,
+                "{'T.one': 1}");
         }
 
         [Test]
@@ -287,7 +501,7 @@ namespace MongoDB.Driver.Tests.Linq.Translators
         {
             Assert(
                 x => x.G.Count() == 2,
-                1,
+                2,
                 "{'G': {$size: 2}}");
         }
 
@@ -301,11 +515,29 @@ namespace MongoDB.Driver.Tests.Linq.Translators
         }
 
         [Test]
+        public void Equals_with_byte_based_enum()
+        {
+            Assert(
+                x => x.Q == Q.One,
+                1,
+                "{'Q': 1}");
+        }
+
+        [Test]
+        public void Equals_with_nullable_date_time()
+        {
+            Assert(
+                x => x.R.HasValue && x.R.Value > DateTime.MinValue,
+                1,
+                "{'R': { $ne: null, $gt: ISODate('0001-01-01T00:00:00Z') } }");
+        }
+
+        [Test]
         public void HashSetCount()
         {
             Assert(
                 x => x.L.Count == 3,
-                1,
+                2,
                 "{'L': {$size: 3}}");
         }
 
@@ -314,7 +546,7 @@ namespace MongoDB.Driver.Tests.Linq.Translators
         {
             Assert(
                 x => x.O.Count == 3,
-                1,
+                2,
                 "{'O': {$size: 3}}");
         }
 
@@ -378,7 +610,7 @@ namespace MongoDB.Driver.Tests.Linq.Translators
         {
             Assert(
                 x => !x.A.Contains("some"),
-                0,
+                1,
                 "{A: {$not: /some/s}}");
         }
 
@@ -423,36 +655,54 @@ namespace MongoDB.Driver.Tests.Linq.Translators
         {
             Assert(
                 x => !x.A.Equals("Awesome"),
-                0,
+                1,
                 "{A: {$ne: 'Awesome'}}");
         }
 
         [Test]
-        public async Task Binding_through_an_unnecessary_conversion()
+        public void String_IsNullOrEmpty()
         {
-            var root = await Find(_collection, 10);
+            Assert(
+                x => string.IsNullOrEmpty(x.A),
+                0,
+                "{A: { $in: [null, ''] } }");
+        }
+
+        [Test]
+        public void Not_String_IsNullOrEmpty()
+        {
+            Assert(
+                x => !string.IsNullOrEmpty(x.A),
+                2,
+                "{A: { $nin: [null, ''] } }");
+        }
+
+        [Test]
+        public void Binding_through_an_unnecessary_conversion()
+        {
+            var root = FindFirstOrDefault(_collection, 10);
 
             root.Should().NotBeNull();
             root.A.Should().Be("Awesome");
         }
 
         [Test]
-        public async Task Binding_through_an_unnecessary_conversion_with_a_builder()
+        public void Binding_through_an_unnecessary_conversion_with_a_builder()
         {
-            var root = await FindWithBuilder(_collection, 10);
+            var root = FindFirstOrDefaultWithBuilder(_collection, 10);
 
             root.Should().NotBeNull();
             root.A.Should().Be("Awesome");
         }
 
-        private Task<T> Find<T>(IMongoCollection<T> collection, int id) where T : IRoot
+        private T FindFirstOrDefault<T>(IMongoCollection<T> collection, int id) where T : IRoot
         {
-            return collection.Find(x => x.Id == id).FirstOrDefaultAsync();
+            return collection.FindSync(x => x.Id == id).FirstOrDefault();
         }
 
-        private Task<T> FindWithBuilder<T>(IMongoCollection<T> collection, int id) where T : IRoot
+        private T FindFirstOrDefaultWithBuilder<T>(IMongoCollection<T> collection, int id) where T : IRoot
         {
-            return collection.Find(Builders<T>.Filter.Eq(x => x.Id, id)).FirstOrDefaultAsync();
+            return collection.FindSync(Builders<T>.Filter.Eq(x => x.Id, id)).FirstOrDefault();
         }
 
         public void Assert(Expression<Func<Root, bool>> filter, int expectedCount, string expectedFilter)
@@ -465,12 +715,10 @@ namespace MongoDB.Driver.Tests.Linq.Translators
             var serializer = BsonSerializer.SerializerRegistry.GetSerializer<Root>();
             var filterDocument = PredicateTranslator.Translate(filter, serializer, BsonSerializer.SerializerRegistry);
 
-            using (var cursor = _collection.FindAsync(filterDocument).GetAwaiter().GetResult())
-            {
-                var list = cursor.ToListAsync().GetAwaiter().GetResult();
-                filterDocument.Should().Be(expectedFilter);
-                list.Count.Should().Be(expectedCount);
-            }
+            var list = _collection.FindSync(filterDocument).ToList();
+
+            filterDocument.Should().Be(expectedFilter);
+            list.Count.Should().Be(expectedCount);
         }
     }
 }

@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+﻿/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -24,6 +24,22 @@ namespace MongoDB.Bson
     [Serializable]
     public class BsonDouble : BsonValue, IComparable<BsonDouble>, IEquatable<BsonDouble>
     {
+         #region static
+        const int __minPrecreatedValue = -100;
+        const int __maxPrecreatedValue = 100;
+        private static readonly BsonDouble[] __precreatedInstances = new BsonDouble[__maxPrecreatedValue - __minPrecreatedValue + 1];
+
+        static BsonDouble()
+        {
+            for (var i = __minPrecreatedValue; i <= __maxPrecreatedValue; i++)
+            {
+                var precreatedInstance = new BsonDouble(i);
+                var index = i - __minPrecreatedValue;
+                __precreatedInstances[index] = precreatedInstance;
+            }
+        }
+        #endregion
+
         // private fields
         private double _value;
 
@@ -71,6 +87,12 @@ namespace MongoDB.Bson
         /// <returns>A BsonDouble.</returns>
         public static implicit operator BsonDouble(double value)
         {
+            var intValue = (int)value;
+            if (intValue == value && intValue >= __minPrecreatedValue && intValue <= __maxPrecreatedValue)
+            {
+                var index = intValue - __minPrecreatedValue;
+                return __precreatedInstances[index];
+            }
             return new BsonDouble(value);
         }
 
@@ -231,6 +253,98 @@ namespace MongoDB.Bson
         }
 
         // protected methods
+        /// <inheritdoc/>
+        protected override TypeCode IConvertibleGetTypeCodeImplementation()
+        {
+            return TypeCode.Double;
+        }
+
+        /// <inheritdoc/>
+        protected override bool IConvertibleToBooleanImplementation(IFormatProvider provider)
+        {
+            return Convert.ToBoolean(_value, provider);
+        }
+
+        /// <inheritdoc/>
+        protected override byte IConvertibleToByteImplementation(IFormatProvider provider)
+        {
+            return Convert.ToByte(_value, provider);
+        }
+
+        /// <inheritdoc/>
+        protected override decimal IConvertibleToDecimalImplementation(IFormatProvider provider)
+        {
+            return Convert.ToDecimal(_value, provider);
+        }
+
+        /// <inheritdoc/>
+        protected override double IConvertibleToDoubleImplementation(IFormatProvider provider)
+        {
+            return _value;
+        }
+
+        /// <inheritdoc/>
+        protected override short IConvertibleToInt16Implementation(IFormatProvider provider)
+        {
+            return Convert.ToInt16(_value, provider);
+        }
+
+        /// <inheritdoc/>
+        protected override int IConvertibleToInt32Implementation(IFormatProvider provider)
+        {
+            return Convert.ToInt32(_value, provider);
+        }
+
+        /// <inheritdoc/>
+        protected override long IConvertibleToInt64Implementation(IFormatProvider provider)
+        {
+            return Convert.ToInt64(_value, provider);
+        }
+
+        /// <inheritdoc/>
+#pragma warning disable 3002
+        protected override sbyte IConvertibleToSByteImplementation(IFormatProvider provider)
+        {
+            return Convert.ToSByte(_value, provider);
+        }
+#pragma warning restore
+
+        /// <inheritdoc/>
+        protected override float IConvertibleToSingleImplementation(IFormatProvider provider)
+        {
+            return Convert.ToSingle(_value, provider);
+        }
+
+        /// <inheritdoc/>
+        protected override string IConvertibleToStringImplementation(IFormatProvider provider)
+        {
+            return Convert.ToString(_value, provider);
+        }
+
+        /// <inheritdoc/>
+#pragma warning disable 3002
+        protected override ushort IConvertibleToUInt16Implementation(IFormatProvider provider)
+        {
+            return Convert.ToUInt16(_value, provider);
+        }
+#pragma warning restore
+
+        /// <inheritdoc/>
+#pragma warning disable 3002
+        protected override uint IConvertibleToUInt32Implementation(IFormatProvider provider)
+        {
+            return Convert.ToUInt32(_value, provider);
+        }
+#pragma warning restore
+
+        /// <inheritdoc/>
+#pragma warning disable 3002
+        protected override ulong IConvertibleToUInt64Implementation(IFormatProvider provider)
+        {
+            return Convert.ToUInt64(_value, provider);
+        }
+#pragma warning restore
+
         /// <summary>
         /// Compares this BsonDouble against another BsonValue.
         /// </summary>

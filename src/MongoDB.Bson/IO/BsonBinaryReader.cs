@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -188,7 +188,7 @@ namespace MongoDB.Bson.IO
         public override BsonType ReadBsonType()
         {
             if (Disposed) { ThrowObjectDisposedException(); }
-            if (State == BsonReaderState.Initial || State == BsonReaderState.Done || State == BsonReaderState.ScopeDocument)
+            if (State == BsonReaderState.Initial || State == BsonReaderState.ScopeDocument)
             {
                 // there is an implied type of Document for the top level and for scope documents
                 CurrentBsonType = BsonType.Document;
@@ -253,7 +253,7 @@ namespace MongoDB.Bson.IO
             var subType = _bsonStream.ReadBinarySubType();
             if (subType != BsonBinarySubType.Binary && subType != BsonBinarySubType.OldBinary)
             {
-                var message = string.Format("ReadBytes requires the binary sub type to be Binary, not {2}.", subType);
+                var message = string.Format("ReadBytes requires the binary sub type to be Binary, not {0}.", subType);
                 throw new FormatException(message);
             }
 
@@ -318,7 +318,7 @@ namespace MongoDB.Bson.IO
             {
                 case ContextType.Array: State = BsonReaderState.Type; break;
                 case ContextType.Document: State = BsonReaderState.Type; break;
-                case ContextType.TopLevel: State = BsonReaderState.Done; break;
+                case ContextType.TopLevel: State = BsonReaderState.Initial; break;
                 default: throw new BsonInternalException("Unexpected ContextType.");
             }
         }
@@ -351,7 +351,7 @@ namespace MongoDB.Bson.IO
             {
                 case ContextType.Array: State = BsonReaderState.Type; break;
                 case ContextType.Document: State = BsonReaderState.Type; break;
-                case ContextType.TopLevel: State = BsonReaderState.Done; break;
+                case ContextType.TopLevel: State = BsonReaderState.Initial; break;
                 default: throw new BsonInternalException("Unexpected ContextType.");
             }
         }
@@ -497,7 +497,7 @@ namespace MongoDB.Bson.IO
             {
                 case ContextType.Array: State = BsonReaderState.Type; break;
                 case ContextType.Document: State = BsonReaderState.Type; break;
-                case ContextType.TopLevel: State = BsonReaderState.Done; break;
+                case ContextType.TopLevel: State = BsonReaderState.Initial; break;
                 default: throw new BsonInternalException("Unexpected ContextType.");
             }
 
@@ -525,7 +525,7 @@ namespace MongoDB.Bson.IO
             {
                 case ContextType.Array: State = BsonReaderState.Type; break;
                 case ContextType.Document: State = BsonReaderState.Type; break;
-                case ContextType.TopLevel: State = BsonReaderState.Done; break;
+                case ContextType.TopLevel: State = BsonReaderState.Initial; break;
                 default: throw new BsonInternalException("Unexpected ContextType.");
             }
 
@@ -719,7 +719,7 @@ namespace MongoDB.Bson.IO
                 case ContextType.ScopeDocument:
                     return BsonReaderState.Type;
                 case ContextType.TopLevel:
-                    return BsonReaderState.Done;
+                    return BsonReaderState.Initial;
                 default:
                     throw new BsonInternalException("Unexpected ContextType.");
             }

@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -124,7 +124,7 @@ namespace MongoDB.Bson.IO
         /// <returns>The current BsonType.</returns>
         public BsonType GetCurrentBsonType()
         {
-            if (_state == BsonReaderState.Initial || _state == BsonReaderState.Done || _state == BsonReaderState.ScopeDocument || _state == BsonReaderState.Type)
+            if (_state == BsonReaderState.Initial || _state == BsonReaderState.ScopeDocument || _state == BsonReaderState.Type)
             {
                 ReadBsonType();
             }

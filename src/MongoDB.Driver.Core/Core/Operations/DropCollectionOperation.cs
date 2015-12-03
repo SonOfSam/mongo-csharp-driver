@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -43,7 +43,7 @@ namespace MongoDB.Driver.Core.Operations
             CollectionNamespace collectionNamespace,
             MessageEncoderSettings messageEncoderSettings)
         {
-            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, "collectionNamespace");
+            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, nameof(collectionNamespace));
             _messageEncoderSettings = messageEncoderSettings;
         }
 
@@ -70,30 +70,60 @@ namespace MongoDB.Driver.Core.Operations
             get { return _messageEncoderSettings; }
         }
 
-        // methods
-        internal BsonDocument CreateCommand()
+        // public methods
+        /// <inheritdoc/>
+        public BsonDocument Execute(IWriteBinding binding, CancellationToken cancellationToken)
         {
-            return new BsonDocument { { "drop", _collectionNamespace.CollectionName } };
+            Ensure.IsNotNull(binding, nameof(binding));
+            var operation = CreateOperation();
+            try
+            {
+                return operation.Execute(binding, cancellationToken);
+            }
+            catch (MongoCommandException ex)
+            {
+                if (ShouldIgnoreException(ex))
+                {
+                    return ex.Result;
+                }
+                throw;
+            }
         }
 
         /// <inheritdoc/>
         public async Task<BsonDocument> ExecuteAsync(IWriteBinding binding, CancellationToken cancellationToken)
         {
-            Ensure.IsNotNull(binding, "binding");
-            var command = CreateCommand();
-            var operation = new WriteCommandOperation<BsonDocument>(_collectionNamespace.DatabaseNamespace, command, BsonDocumentSerializer.Instance, _messageEncoderSettings);
+            Ensure.IsNotNull(binding, nameof(binding));
+            var operation = CreateOperation();
             try
             {
                 return await operation.ExecuteAsync(binding, cancellationToken).ConfigureAwait(false);
             }
             catch (MongoCommandException ex)
             {
-                if (ex.ErrorMessage == "ns not found")
+                if (ShouldIgnoreException(ex))
                 {
                     return ex.Result;
                 }
                 throw;
             }
+        }
+
+        // private methods
+        internal BsonDocument CreateCommand()
+        {
+            return new BsonDocument { { "drop", _collectionNamespace.CollectionName } };
+        }
+
+        private WriteCommandOperation<BsonDocument> CreateOperation()
+        {
+            var command = CreateCommand();
+            return new WriteCommandOperation<BsonDocument>(_collectionNamespace.DatabaseNamespace, command, BsonDocumentSerializer.Instance, _messageEncoderSettings);
+        }
+
+        private bool ShouldIgnoreException(MongoCommandException ex)
+        {
+            return ex.ErrorMessage == "ns not found";
         }
     }
 }

@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -43,18 +43,15 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages
             int batchSize)
             : base(requestId)
         {
-            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, "collectionNamespace");
+            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, nameof(collectionNamespace));
             _cursorId = cursorId;
-            _batchSize = Ensure.IsGreaterThanOrEqualToZero(batchSize, "batchSize");
+            _batchSize = Ensure.IsGreaterThanOrEqualToZero(batchSize, nameof(batchSize));
         }
 
         // properties
         /// <summary>
         /// Gets the size of a batch.
         /// </summary>
-        /// <value>
-        /// The size of a batch.
-        /// </value>
         public int BatchSize
         {
             get { return _batchSize; }
@@ -63,9 +60,6 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages
         /// <summary>
         /// Gets the collection namespace.
         /// </summary>
-        /// <value>
-        /// The collection namespace.
-        /// </value>
         public CollectionNamespace CollectionNamespace
         {
             get { return _collectionNamespace; }
@@ -74,12 +68,15 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages
         /// <summary>
         /// Gets the cursor identifier.
         /// </summary>
-        /// <value>
-        /// The cursor identifier.
-        /// </value>
         public long CursorId
         {
             get { return _cursorId; }
+        }
+
+        /// <inheritdoc/>
+        public override MongoDBMessageType MessageType
+        {
+            get { return MongoDBMessageType.GetMore; }
         }
 
         // methods

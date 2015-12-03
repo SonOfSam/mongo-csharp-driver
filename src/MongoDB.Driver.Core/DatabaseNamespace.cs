@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -65,8 +65,8 @@ namespace MongoDB.Driver
         /// <param name="databaseName">The name of the database.</param>
         public DatabaseNamespace(string databaseName)
         {
-            Ensure.IsNotNull(databaseName, "databaseName");
-            _databaseName = Ensure.That(databaseName, IsValid, "databaseName", "Database names must be non-empty and not contain '.' or the null character.");
+            Ensure.IsNotNull(databaseName, nameof(databaseName));
+            _databaseName = Ensure.That(databaseName, IsValid, nameof(databaseName), "Database names must be non-empty and not contain '.' or the null character.");
         }
 
         // properties
@@ -100,7 +100,7 @@ namespace MongoDB.Driver
         /// <inheritdoc/>
         public bool Equals(DatabaseNamespace other)
         {
-            if(other == null)
+            if (other == null)
             {
                 return false;
             }

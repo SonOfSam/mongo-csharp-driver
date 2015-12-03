@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -194,6 +194,46 @@ namespace MongoDB.Driver.Tests.Builders
             var expected = "{ \"x\" : { \"$ne\" : 1 }, \"y\" : { \"$ne\" : 2 } }";
             Assert.AreEqual(expected, query.ToJson());
             Assert.AreEqual(NegateArbitraryQuery(expected), Query.Not(query).ToJson());
+        }
+
+        [Test]
+        public void TestBitsAllClear()
+        {
+            var query = Query.BitsAllClear("x", 3);
+            var expected = "{ \"x\" : { \"$bitsAllClear\" : NumberLong(3) } }";
+            var negated = "{ \"x\" : { \"$not\" : { \"$bitsAllClear\" : NumberLong(3) } } }";
+            Assert.AreEqual(expected, query.ToJson());
+            Assert.AreEqual(negated, Query.Not(query).ToJson());
+        }
+
+        [Test]
+        public void TestBitsAllSet()
+        {
+            var query = Query.BitsAllSet("x", 3);
+            var expected = "{ \"x\" : { \"$bitsAllSet\" : NumberLong(3) } }";
+            var negated = "{ \"x\" : { \"$not\" : { \"$bitsAllSet\" : NumberLong(3) } } }";
+            Assert.AreEqual(expected, query.ToJson());
+            Assert.AreEqual(negated, Query.Not(query).ToJson());
+        }
+
+        [Test]
+        public void TestBitsAnyClear()
+        {
+            var query = Query.BitsAnyClear("x", 3);
+            var expected = "{ \"x\" : { \"$bitsAnyClear\" : NumberLong(3) } }";
+            var negated = "{ \"x\" : { \"$not\" : { \"$bitsAnyClear\" : NumberLong(3) } } }";
+            Assert.AreEqual(expected, query.ToJson());
+            Assert.AreEqual(negated, Query.Not(query).ToJson());
+        }
+
+        [Test]
+        public void TestBitsAnySet()
+        {
+            var query = Query.BitsAnySet("x", 3);
+            var expected = "{ \"x\" : { \"$bitsAnySet\" : NumberLong(3) } }";
+            var negated = "{ \"x\" : { \"$not\" : { \"$bitsAnySet\" : NumberLong(3) } } }";
+            Assert.AreEqual(expected, query.ToJson());
+            Assert.AreEqual(negated, Query.Not(query).ToJson());
         }
 
         [Test]
@@ -717,8 +757,22 @@ namespace MongoDB.Driver.Tests.Builders
         [Test]
         public void TestTextQueryGenerationWithNullLanguage()
         {
-            var query = Query.Text("foo", null);
+            var query = Query.Text("foo", (string)null);
             var expected = "{ \"$text\" : { \"$search\" : \"foo\" } }";
+            Assert.AreEqual(expected, query.ToJson());
+        }
+
+        [Test]
+        public void TestTextWithOptionsQueryGeneration()
+        {
+            var options = new TextSearchOptions
+            {
+                Language = "norwegian",
+                CaseSensitive = true,
+                DiacriticSensitive = true
+            };
+            var query = Query.Text("foo", options);
+            var expected = "{ \"$text\" : { \"$search\" : \"foo\", \"$language\" : \"norwegian\", \"$caseSensitive\" : true, \"$diacriticSensitive\" : true } }";
             Assert.AreEqual(expected, query.ToJson());
         }
 
@@ -727,6 +781,15 @@ namespace MongoDB.Driver.Tests.Builders
         {
             var query = Query.Type("a", BsonType.String);
             var selector = "{ \"$type\" : 2 }";
+            Assert.AreEqual(PositiveTest("a", selector), query.ToJson());
+            Assert.AreEqual(NegativeTest("a", selector), Query.Not(query).ToJson());
+        }
+
+        [Test]
+        public void TestType_number()
+        {
+            var query = Query.Type("a", "number");
+            var selector = "{ \"$type\" : \"number\" }";
             Assert.AreEqual(PositiveTest("a", selector), query.ToJson());
             Assert.AreEqual(NegativeTest("a", selector), Query.Not(query).ToJson());
         }
@@ -944,7 +1007,7 @@ namespace MongoDB.Driver.Tests.Builders
             }
         }
 
- 
+
         [Test]
         public void TestText()
         {

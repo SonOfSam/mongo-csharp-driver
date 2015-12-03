@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -184,6 +184,62 @@ namespace MongoDB.Driver
         {
             get { return _weights; }
             set { _weights = value; }
+        }
+    }
+
+    /// <summary>
+    /// Options for creating an index.
+    /// </summary>
+    /// <typeparam name="TDocument">The type of the document.</typeparam>
+    public class CreateIndexOptions<TDocument> : CreateIndexOptions
+    {
+        #region static
+        // internal static methods
+        internal static CreateIndexOptions<TDocument> CoercedFrom(CreateIndexOptions options)
+        {
+            if (options == null)
+            {
+                return null;
+            }
+
+            if (options.GetType() == typeof(CreateIndexOptions))
+            {
+                return new CreateIndexOptions<TDocument>
+                {
+                    Background = options.Background,
+                    Bits = options.Bits,
+                    BucketSize = options.BucketSize,
+                    DefaultLanguage = options.DefaultLanguage,
+                    ExpireAfter = options.ExpireAfter,
+                    LanguageOverride = options.LanguageOverride,
+                    Max = options.Max,
+                    Min = options.Min,
+                    Name = options.Name,
+                    Sparse = options.Sparse,
+                    SphereIndexVersion = options.SphereIndexVersion,
+                    StorageEngine = options.StorageEngine,
+                    TextIndexVersion = options.TextIndexVersion,
+                    Unique = options.Unique,
+                    Version = options.Version,
+                    Weights = options.Weights
+                };
+            }
+
+            return (CreateIndexOptions<TDocument>)options;
+        }
+        #endregion
+
+        // private fields
+        private FilterDefinition<TDocument> _partialFilterExpression;
+
+        // public properties
+        /// <summary>
+        /// Gets or sets the partial filter expression.
+        /// </summary>
+        public FilterDefinition<TDocument> PartialFilterExpression
+        {
+            get { return _partialFilterExpression; }
+            set { _partialFilterExpression = value; }
         }
     }
 }

@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -51,11 +51,20 @@ namespace MongoDB.Driver.Tests
         }
 
         [Test]
-        public async Task DropDatabaseAsync_should_invoke_the_correct_operation()
+        public void DropDatabase_should_invoke_the_correct_operation(
+            [Values(false, true)] bool async)
         {
             var operationExecutor = new MockOperationExecutor();
             var client = new MongoClient(operationExecutor);
-            await client.DropDatabaseAsync("awesome");
+
+            if (async)
+            {
+                client.DropDatabaseAsync("awesome").GetAwaiter().GetResult();
+            }
+            else
+            {
+                client.DropDatabase("awesome");
+            }
 
             var call = operationExecutor.GetWriteCall<BsonDocument>();
 
@@ -64,11 +73,20 @@ namespace MongoDB.Driver.Tests
         }
 
         [Test]
-        public async Task ListDatabasesAsync_should_invoke_the_correct_operation()
+        public void ListDatabases_should_invoke_the_correct_operation(
+            [Values(false, true)] bool async)
         {
             var operationExecutor = new MockOperationExecutor();
             var client = new MongoClient(operationExecutor);
-            await client.ListDatabasesAsync();
+
+            if (async)
+            {
+                client.ListDatabasesAsync().GetAwaiter().GetResult();
+            }
+            else
+            {
+                client.ListDatabases();
+            }
 
             var call = operationExecutor.GetReadCall<IAsyncCursor<BsonDocument>>();
 

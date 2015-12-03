@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+﻿/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -28,14 +28,14 @@ namespace MongoDB.Bson.Serialization.Serializers
     {
         // private fields
         private readonly IDiscriminatorConvention _discriminatorConvention = new ScalarDiscriminatorConvention("_t");
-        private readonly IBsonSerializer _itemSerializer;
+        private readonly Lazy<IBsonSerializer> _lazyItemSerializer;
 
         // constructors
         /// <summary>
         /// Initializes a new instance of the <see cref="EnumerableSerializerBase{TValue}"/> class.
         /// </summary>
         protected EnumerableSerializerBase()
-            : this(BsonSerializer.LookupSerializer(typeof(object)))
+            : this(BsonSerializer.SerializerRegistry)
         {
         }
 
@@ -50,7 +50,21 @@ namespace MongoDB.Bson.Serialization.Serializers
                 throw new ArgumentNullException("itemSerializer");
             }
 
-            _itemSerializer = itemSerializer;
+            _lazyItemSerializer = new Lazy<IBsonSerializer>(() => itemSerializer);
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="EnumerableSerializerBase{TValue}" /> class.
+        /// </summary>
+        /// <param name="serializerRegistry">The serializer registry.</param>
+        protected EnumerableSerializerBase(IBsonSerializerRegistry serializerRegistry)
+        {
+            if (serializerRegistry == null)
+            {
+                throw new ArgumentNullException("serializerRegistry");
+            }
+
+            _lazyItemSerializer = new Lazy<IBsonSerializer>(() => serializerRegistry.GetSerializer(typeof(object)));
         }
 
         /// <summary>
@@ -61,7 +75,7 @@ namespace MongoDB.Bson.Serialization.Serializers
         /// </value>
         public IBsonSerializer ItemSerializer
         {
-            get { return _itemSerializer; }
+            get { return _lazyItemSerializer.Value; }
         }
 
         // public methods
@@ -87,7 +101,7 @@ namespace MongoDB.Bson.Serialization.Serializers
                     var accumulator = CreateAccumulator();
                     while (bsonReader.ReadBsonType() != BsonType.EndOfDocument)
                     {
-                        var item = _itemSerializer.Deserialize(context);
+                        var item = _lazyItemSerializer.Value.Deserialize(context);
                         AddItem(accumulator, item);
                     }
                     bsonReader.ReadEndArray();
@@ -110,13 +124,17 @@ namespace MongoDB.Bson.Serialization.Serializers
         }
 
         /// <summary>
-        /// Gets the serialization info for individual items of an enumerable type.
+        /// Tries to get the serialization info for the individual items of the array.
         /// </summary>
-        /// <returns>The serialization info for the items.</returns>
-        public BsonSerializationInfo GetItemSerializationInfo()
+        /// <param name="serializationInfo">The serialization information.</param>
+        /// <returns>
+        ///   <c>true</c> if the serialization info exists; otherwise <c>false</c>.
+        /// </returns>
+        public bool TryGetItemSerializationInfo(out BsonSerializationInfo serializationInfo)
         {
-            string elementName = null;
-            return new BsonSerializationInfo(elementName, _itemSerializer, _itemSerializer.ValueType);
+            var itemSerializer = _lazyItemSerializer.Value;
+            serializationInfo = new BsonSerializationInfo(null, itemSerializer, itemSerializer.ValueType);
+            return true;
         }
 
         /// <summary>
@@ -141,7 +159,7 @@ namespace MongoDB.Bson.Serialization.Serializers
                     bsonWriter.WriteStartArray();
                     foreach (var item in EnumerateItemsInSerializationOrder(value))
                     {
-                        _itemSerializer.Serialize(context, item);
+                        _lazyItemSerializer.Value.Serialize(context, item);
                     }
                     bsonWriter.WriteEndArray();
                 }
@@ -191,14 +209,14 @@ namespace MongoDB.Bson.Serialization.Serializers
     {
         // private fields
         private readonly IDiscriminatorConvention _discriminatorConvention = new ScalarDiscriminatorConvention("_t");
-        private readonly IBsonSerializer<TItem> _itemSerializer;
+        private readonly Lazy<IBsonSerializer<TItem>> _lazyItemSerializer;
 
         // constructors
         /// <summary>
         /// Initializes a new instance of the <see cref="EnumerableSerializerBase{TValue, TItem}"/> class.
         /// </summary>
         protected EnumerableSerializerBase()
-            : this(BsonSerializer.LookupSerializer<TItem>())
+            : this(BsonSerializer.SerializerRegistry)
         {
         }
 
@@ -213,7 +231,21 @@ namespace MongoDB.Bson.Serialization.Serializers
                 throw new ArgumentNullException("itemSerializer");
             }
 
-            _itemSerializer = itemSerializer;
+            _lazyItemSerializer = new Lazy<IBsonSerializer<TItem>>(() => itemSerializer);
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="EnumerableSerializerBase{TValue, TItem}" /> class.
+        /// </summary>
+        /// <param name="serializerRegistry">The serializer registry.</param>
+        protected EnumerableSerializerBase(IBsonSerializerRegistry serializerRegistry)
+        {
+            if (serializerRegistry == null)
+            {
+                throw new ArgumentNullException("serializerRegistry");
+            }
+
+            _lazyItemSerializer = new Lazy<IBsonSerializer<TItem>>(() => serializerRegistry.GetSerializer<TItem>());
         }
 
         // public properties
@@ -225,7 +257,7 @@ namespace MongoDB.Bson.Serialization.Serializers
         /// </value>
         public IBsonSerializer<TItem> ItemSerializer
         {
-            get { return _itemSerializer; }
+            get { return _lazyItemSerializer.Value; }
         }
 
         // public methods
@@ -251,7 +283,7 @@ namespace MongoDB.Bson.Serialization.Serializers
                     var accumulator = CreateAccumulator();
                     while (bsonReader.ReadBsonType() != BsonType.EndOfDocument)
                     {
-                        var item = _itemSerializer.Deserialize(context);
+                        var item = _lazyItemSerializer.Value.Deserialize(context);
                         AddItem(accumulator, item);
                     }
                     bsonReader.ReadEndArray();
@@ -275,13 +307,17 @@ namespace MongoDB.Bson.Serialization.Serializers
         }
 
         /// <summary>
-        /// Gets the serialization info for individual items of an enumerable type.
+        /// Tries to get the serialization info for the individual items of the array.
         /// </summary>
-        /// <returns>The serialization info for the items.</returns>
-        public BsonSerializationInfo GetItemSerializationInfo()
+        /// <param name="serializationInfo">The serialization information.</param>
+        /// <returns>
+        /// The serialization info for the items.
+        /// </returns>
+        public bool TryGetItemSerializationInfo(out BsonSerializationInfo serializationInfo)
         {
-            string elementName = null;
-            return new BsonSerializationInfo(elementName, _itemSerializer, _itemSerializer.ValueType);
+            var serializer = _lazyItemSerializer.Value;
+            serializationInfo = new BsonSerializationInfo(null, serializer, serializer.ValueType);
+            return true;
         }
 
         /// <summary>
@@ -306,7 +342,7 @@ namespace MongoDB.Bson.Serialization.Serializers
                     bsonWriter.WriteStartArray();
                     foreach (var item in EnumerateItemsInSerializationOrder(value))
                     {
-                        _itemSerializer.Serialize(context, item);
+                        _lazyItemSerializer.Value.Serialize(context, item);
                     }
                     bsonWriter.WriteEndArray();
                 }

@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -47,10 +47,23 @@ namespace MongoDB.Driver.Core.Operations
 
         // test methods
         [Test]
+        public void BypassDocumentValidation_should_get_and_set_value()
+        {
+            var subject = new MapReduceOutputToCollectionOperation(_collectionNamespace, _outputCollectionNamespace, _mapFunction, _reduceFunction, _messageEncoderSettings);
+            var value = true;
+
+            subject.BypassDocumentValidation = value;
+            var result = subject.BypassDocumentValidation;
+
+            result.Should().Be(value);
+        }
+
+        [Test]
         public void constructor_should_initialize_instance()
         {
             var subject = new MapReduceOutputToCollectionOperation(_collectionNamespace, _outputCollectionNamespace, _mapFunction, _reduceFunction, _messageEncoderSettings);
 
+            subject.BypassDocumentValidation.Should().NotHaveValue();
             subject.CollectionNamespace.Should().BeSameAs(_collectionNamespace);
             subject.OutputCollectionNamespace.Should().BeSameAs(_outputCollectionNamespace);
             subject.MapFunction.Should().BeSameAs(_mapFunction);
@@ -126,33 +139,40 @@ namespace MongoDB.Driver.Core.Operations
 
         [Test]
         [RequiresServer(ClusterTypes = ClusterTypes.StandaloneOrReplicaSet)]
-        public async Task ExecuteAsync_should_return_expected_result()
+        public void Execute_should_return_expected_result(
+            [Values(false, true)]
+            bool async)
         {
-            await EnsureTestDataAsync();
+            EnsureTestData();
 
             var mapFunction = "function() { emit(this.x, this.v); }";
             var reduceFunction = "function(key, values) { var sum = 0; for (var i = 0; i < values.length; i++) { sum += values[i]; }; return sum; }";
-            var subject = new MapReduceOutputToCollectionOperation(_collectionNamespace, _outputCollectionNamespace, mapFunction, reduceFunction, _messageEncoderSettings);
+            var subject = new MapReduceOutputToCollectionOperation(_collectionNamespace, _outputCollectionNamespace, mapFunction, reduceFunction, _messageEncoderSettings)
+            {
+                BypassDocumentValidation = true
+            };
             var expectedDocuments = new BsonDocument[]
             {
                 new BsonDocument { {"_id", 1 }, { "value", 3 } },
                 new BsonDocument { {"_id", 2 }, { "value", 4 } },
             };
 
-            var response = await ExecuteOperationAsync(subject);
+            var response = ExecuteOperation(subject, async);
 
             response["ok"].ToBoolean().Should().BeTrue();
 
-            var documents = await ReadAllFromCollectionAsync(_outputCollectionNamespace);
+            var documents = ReadAllFromCollection(_outputCollectionNamespace, async);
             documents.Should().BeEquivalentTo(expectedDocuments);
         }
 
         [Test]
-        public void ExecuteAsync_should_throw_when_binding_is_null()
+        public void Execute_should_throw_when_binding_is_null(
+            [Values(false, true)]
+            bool async)
         {
             var subject = new MapReduceOutputToCollectionOperation(_collectionNamespace, _outputCollectionNamespace, _mapFunction, _reduceFunction, _messageEncoderSettings);
 
-            Action action = () => subject.ExecuteAsync(null, CancellationToken.None);
+            Action action = () => ExecuteOperation(subject, null, async);
 
             action.ShouldThrow<ArgumentNullException>().And.ParamName.Should().Be("binding");
         }
@@ -216,10 +236,10 @@ namespace MongoDB.Driver.Core.Operations
         }
 
         // helper methods
-        private async Task EnsureTestDataAsync()
+        private void EnsureTestData()
         {
-            await DropCollectionAsync();
-            await InsertAsync(
+            DropCollection();
+            Insert(
                 new BsonDocument { { "_id", 1 }, { "x", 1 }, { "v", 1 } },
                 new BsonDocument { { "_id", 2 }, { "x", 1 }, { "v", 2 } },
                 new BsonDocument { { "_id", 3 }, { "x", 2 }, { "v", 4 } });

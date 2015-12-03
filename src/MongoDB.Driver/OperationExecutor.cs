@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -26,48 +26,24 @@ namespace MongoDB.Driver
 {
     internal sealed class OperationExecutor : IOperationExecutor
     {
-        public async Task<TResult> ExecuteReadOperationAsync<TResult>(IReadBinding binding, IReadOperation<TResult> operation, TimeSpan timeout, CancellationToken cancellationToken)
+        public TResult ExecuteReadOperation<TResult>(IReadBinding binding, IReadOperation<TResult> operation, CancellationToken cancellationToken)
         {
-            using (var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
-            {
-                cancellationTokenSource.CancelAfter(timeout);
-                try
-                {
-                    return await operation.ExecuteAsync(binding, cancellationTokenSource.Token).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException ex)
-                {
-                    if (cancellationTokenSource.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
-                    {
-                        var msg = string.Format("Operation timed out after {0}.", timeout);
-                        throw new TimeoutException(msg, ex);
-                    }
-
-                    throw;
-                }
-            }
+            return operation.Execute(binding, cancellationToken);
         }
 
-        public async Task<TResult> ExecuteWriteOperationAsync<TResult>(IWriteBinding binding, IWriteOperation<TResult> operation, TimeSpan timeout, CancellationToken cancellationToken)
+        public async Task<TResult> ExecuteReadOperationAsync<TResult>(IReadBinding binding, IReadOperation<TResult> operation, CancellationToken cancellationToken)
         {
-            using (var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
-            {
-                cancellationTokenSource.CancelAfter(timeout);
-                try
-                {
-                    return await operation.ExecuteAsync(binding, cancellationTokenSource.Token).ConfigureAwait(false);
-                }
-                catch(OperationCanceledException ex)
-                {
-                    if (cancellationTokenSource.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
-                    {
-                        var msg = string.Format("Operation timed out after {0}.", timeout);
-                        throw new TimeoutException(msg, ex);
-                    }
+            return await operation.ExecuteAsync(binding, cancellationToken).ConfigureAwait(false);
+        }
 
-                    throw;
-                }
-            }
+        public TResult ExecuteWriteOperation<TResult>(IWriteBinding binding, IWriteOperation<TResult> operation, CancellationToken cancellationToken)
+        {
+            return operation.Execute(binding, cancellationToken);
+        }
+
+        public async Task<TResult> ExecuteWriteOperationAsync<TResult>(IWriteBinding binding, IWriteOperation<TResult> operation, CancellationToken cancellationToken)
+        {
+            return await operation.ExecuteAsync(binding, cancellationToken).ConfigureAwait(false);
         }
     }
 }

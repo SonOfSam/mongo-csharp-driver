@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -76,8 +76,8 @@ namespace MongoDB.Bson.IO
         /// <inheritdoc/>
         public void Dispose()
         {
-            _disposed = true;
-            _bytes = null;
+            Dispose(true);
+            GC.SuppressFinalize(this);
         }
 
         /// <inheritdoc/>
@@ -85,6 +85,19 @@ namespace MongoDB.Bson.IO
         {
             ThrowIfDisposed();
             return new ByteArrayChunk(_bytes);
+        }
+
+        /// <summary>
+        /// Releases unmanaged and - optionally - managed resources.
+        /// </summary>
+        /// <param name="disposing"><c>true</c> to release both managed and unmanaged resources; <c>false</c> to release only unmanaged resources.</param>
+        protected virtual void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _bytes = null;
+            }
+            _disposed = true;
         }
 
         private void ThrowIfDisposed()

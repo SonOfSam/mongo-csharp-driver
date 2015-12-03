@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -51,7 +51,7 @@ namespace MongoDB.Driver.Core.Authentication
         /// <param name="username">The username.</param>
         public MongoDBX509Authenticator(string username)
         {
-            _username = Ensure.IsNotNullOrEmpty(username, "username");
+            _username = Ensure.IsNotNullOrEmpty(username, nameof(username));
         }
 
         // properties
@@ -61,34 +61,65 @@ namespace MongoDB.Driver.Core.Authentication
             get { return MechanismName; }
         }
 
-        // methods
+        // public methods
         /// <inheritdoc/>
-        public async Task AuthenticateAsync(IConnection connection, ConnectionDescription description, CancellationToken cancellationToken)
+        public void Authenticate(IConnection connection, ConnectionDescription description, CancellationToken cancellationToken)
         {
-            Ensure.IsNotNull(connection, "connection");
-            Ensure.IsNotNull(description, "description");
+            Ensure.IsNotNull(connection, nameof(connection));
+            Ensure.IsNotNull(description, nameof(description));
 
             try
             {
-                var command = new BsonDocument
-                {
-                    { "authenticate", 1 },
-                    { "mechanism", Name },
-                    { "user", _username }
-                };
-                var protocol = new CommandWireProtocol<BsonDocument>(
-                    new DatabaseNamespace("$external"),
-                    command,
-                    true,
-                    BsonDocumentSerializer.Instance,
-                    null);
+                var protocol = CreateAuthenticateProtocol();
+                protocol.Execute(connection, cancellationToken);
+            }
+            catch (MongoCommandException ex)
+            {
+                throw CreateException(connection, ex);
+            }
+        }
+
+        /// <inheritdoc/>
+        public async Task AuthenticateAsync(IConnection connection, ConnectionDescription description, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNull(connection, nameof(connection));
+            Ensure.IsNotNull(description, nameof(description));
+
+            try
+            {
+                var protocol = CreateAuthenticateProtocol();
                 await protocol.ExecuteAsync(connection, cancellationToken).ConfigureAwait(false);
             }
             catch (MongoCommandException ex)
             {
-                var message = string.Format("Unable to authenticate username '{0}' using protocol '{1}'.", _username, Name);
-                throw new MongoAuthenticationException(connection.ConnectionId, message, ex);
+                throw CreateException(connection, ex);
             }
+        }
+
+        // private methods
+        private CommandWireProtocol<BsonDocument> CreateAuthenticateProtocol()
+        {
+            var command = new BsonDocument
+            {
+                { "authenticate", 1 },
+                { "mechanism", Name },
+                { "user", _username }
+            };
+
+            var protocol = new CommandWireProtocol<BsonDocument>(
+                new DatabaseNamespace("$external"),
+                command,
+                true,
+                BsonDocumentSerializer.Instance,
+                null);
+
+            return protocol;
+        }
+
+        private MongoAuthenticationException CreateException(IConnection connection, Exception ex)
+        {
+            var message = string.Format("Unable to authenticate username '{0}' using protocol '{1}'.", _username, Name);
+            return new MongoAuthenticationException(connection.ConnectionId, message, ex);
         }
     }
 }

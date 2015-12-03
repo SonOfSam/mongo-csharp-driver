@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -47,8 +47,8 @@ namespace MongoDB.Driver.Core.Operations
             CollectionNamespace newCollectionNamespace,
             MessageEncoderSettings messageEncoderSettings)
         {
-            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, "collectionNamespace");
-            _newCollectionNamespace = Ensure.IsNotNull(newCollectionNamespace, "newCollectionNamespace");
+            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, nameof(collectionNamespace));
+            _newCollectionNamespace = Ensure.IsNotNull(newCollectionNamespace, nameof(newCollectionNamespace));
             _messageEncoderSettings = messageEncoderSettings;
         }
 
@@ -109,12 +109,25 @@ namespace MongoDB.Driver.Core.Operations
             };
         }
 
+        private WriteCommandOperation<BsonDocument> CreateOperation()
+        {
+            var command = CreateCommand();
+            return new WriteCommandOperation<BsonDocument>(DatabaseNamespace.Admin, command, BsonDocumentSerializer.Instance, _messageEncoderSettings);
+        }
+
+        /// <inheritdoc/>
+        public BsonDocument Execute(IWriteBinding binding, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNull(binding, nameof(binding));
+            var operation = CreateOperation();
+            return operation.Execute(binding, cancellationToken);
+        }
+
         /// <inheritdoc/>
         public async Task<BsonDocument> ExecuteAsync(IWriteBinding binding, CancellationToken cancellationToken)
         {
-            Ensure.IsNotNull(binding, "binding");
-            var command = CreateCommand();
-            var operation = new WriteCommandOperation<BsonDocument>(DatabaseNamespace.Admin, command, BsonDocumentSerializer.Instance, _messageEncoderSettings);
+            Ensure.IsNotNull(binding, nameof(binding));
+            var operation = CreateOperation();
             return await operation.ExecuteAsync(binding, cancellationToken).ConfigureAwait(false);
         }
     }

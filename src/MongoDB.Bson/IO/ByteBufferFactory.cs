@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -52,7 +52,19 @@ namespace MongoDB.Bson.IO
 
             if (chunks.Count == 1)
             {
-                return new SingleChunkBuffer(chunks[0], 0, isReadOnly: false);
+                var chunk = chunks[0];
+
+                ByteArrayChunk byteArrayChunk;
+                if ((byteArrayChunk = chunk as ByteArrayChunk) != null)
+                {
+                    var segment = byteArrayChunk.Bytes;
+                    if (segment.Offset == 0)
+                    {
+                        return new ByteArrayBuffer(segment.Array, segment.Count, isReadOnly: false);
+                    }
+                }
+
+                return new SingleChunkBuffer(chunk, 0, isReadOnly: false);
             }
             else
             {

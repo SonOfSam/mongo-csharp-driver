@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ using System.Text;
 using System.Threading;
 using MongoDB.Bson;
 using MongoDB.Driver.Core.Configuration;
+using MongoDB.Driver.Core.Misc;
 using MongoDB.Shared;
 
 namespace MongoDB.Driver
@@ -42,11 +43,12 @@ namespace MongoDB.Driver
         private TimeSpan _maxConnectionLifeTime;
         private int _maxConnectionPoolSize;
         private int _minConnectionPoolSize;
-        private TimeSpan _operationTimeout;
+        private ReadConcern _readConcern;
         private UTF8Encoding _readEncoding;
         private ReadPreference _readPreference;
         private string _replicaSetName;
         private List<MongoServerAddress> _servers;
+        private TimeSpan _serverSelectionTimeout;
         private TimeSpan _socketTimeout;
         private SslSettings _sslSettings;
         private bool _useSsl;
@@ -77,11 +79,12 @@ namespace MongoDB.Driver
             _maxConnectionLifeTime = MongoDefaults.MaxConnectionLifeTime;
             _maxConnectionPoolSize = MongoDefaults.MaxConnectionPoolSize;
             _minConnectionPoolSize = MongoDefaults.MinConnectionPoolSize;
-            _operationTimeout = MongoDefaults.OperationTimeout;
+            _readConcern = ReadConcern.Default;
             _readEncoding = null;
             _readPreference = ReadPreference.Primary;
             _replicaSetName = null;
             _servers = new List<MongoServerAddress> { new MongoServerAddress("localhost") };
+            _serverSelectionTimeout = MongoDefaults.ServerSelectionTimeout;
             _socketTimeout = MongoDefaults.SocketTimeout;
             _sslSettings = null;
             _useSsl = false;
@@ -249,15 +252,15 @@ namespace MongoDB.Driver
         }
 
         /// <summary>
-        /// Gets or sets the operation timeout.
+        /// Gets or sets the read concern.
         /// </summary>
-        public TimeSpan OperationTimeout
+        public ReadConcern ReadConcern
         {
-            get { return _operationTimeout; }
+            get { return _readConcern; }
             set
             {
                 if (_isFrozen) { throw new InvalidOperationException("MongoClientSettings is frozen."); }
-                _operationTimeout = value;
+                _readConcern = Ensure.IsNotNull(value, nameof(value));
             }
         }
 
@@ -335,6 +338,19 @@ namespace MongoDB.Driver
                     throw new ArgumentNullException("value");
                 }
                 _servers = new List<MongoServerAddress>(value);
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets the server selection timeout.
+        /// </summary>
+        public TimeSpan ServerSelectionTimeout
+        {
+            get { return _serverSelectionTimeout; }
+            set
+            {
+                if (_isFrozen) { throw new InvalidOperationException("MongoClientSettings is frozen."); }
+                _serverSelectionTimeout = value;
             }
         }
 
@@ -511,11 +527,13 @@ namespace MongoDB.Driver
             clientSettings.MaxConnectionLifeTime = url.MaxConnectionLifeTime;
             clientSettings.MaxConnectionPoolSize = url.MaxConnectionPoolSize;
             clientSettings.MinConnectionPoolSize = url.MinConnectionPoolSize;
+            clientSettings.ReadConcern = new ReadConcern(url.ReadConcernLevel);
             clientSettings.ReadEncoding = null; // ReadEncoding must be provided in code
             clientSettings.ReadPreference = (url.ReadPreference == null) ? ReadPreference.Primary : url.ReadPreference;
             clientSettings.ReplicaSetName = url.ReplicaSetName;
             clientSettings.LocalThreshold = url.LocalThreshold;
             clientSettings.Servers = new List<MongoServerAddress>(url.Servers);
+            clientSettings.ServerSelectionTimeout = url.ServerSelectionTimeout;
             clientSettings.SocketTimeout = url.SocketTimeout;
             clientSettings.SslSettings = null; // SSL settings must be provided in code
             clientSettings.UseSsl = url.UseSsl;
@@ -545,12 +563,13 @@ namespace MongoDB.Driver
             clone._maxConnectionLifeTime = _maxConnectionLifeTime;
             clone._maxConnectionPoolSize = _maxConnectionPoolSize;
             clone._minConnectionPoolSize = _minConnectionPoolSize;
-            clone._operationTimeout = _operationTimeout;
+            clone._readConcern = _readConcern;
             clone._readEncoding = _readEncoding;
             clone._readPreference = _readPreference;
             clone._replicaSetName = _replicaSetName;
             clone._localThreshold = _localThreshold;
             clone._servers = new List<MongoServerAddress>(_servers);
+            clone._serverSelectionTimeout = _serverSelectionTimeout;
             clone._socketTimeout = _socketTimeout;
             clone._sslSettings = (_sslSettings == null) ? null : _sslSettings.Clone();
             clone._useSsl = _useSsl;
@@ -596,12 +615,13 @@ namespace MongoDB.Driver
                 _maxConnectionLifeTime == rhs._maxConnectionLifeTime &&
                 _maxConnectionPoolSize == rhs._maxConnectionPoolSize &&
                 _minConnectionPoolSize == rhs._minConnectionPoolSize &&
-                _operationTimeout == rhs._operationTimeout &&
                 object.Equals(_readEncoding, rhs._readEncoding) &&
+                object.Equals(_readConcern, rhs._readConcern) &&
                 _readPreference == rhs._readPreference &&
                 _replicaSetName == rhs._replicaSetName &&
                 _localThreshold == rhs._localThreshold &&
                 _servers.SequenceEqual(rhs._servers) &&
+                _serverSelectionTimeout == rhs._serverSelectionTimeout &&
                 _socketTimeout == rhs._socketTimeout &&
                 _sslSettings == rhs._sslSettings &&
                 _useSsl == rhs._useSsl &&
@@ -665,12 +685,13 @@ namespace MongoDB.Driver
                 .Hash(_maxConnectionLifeTime)
                 .Hash(_maxConnectionPoolSize)
                 .Hash(_minConnectionPoolSize)
-                .Hash(_operationTimeout)
+                .Hash(_readConcern)
                 .Hash(_readEncoding)
                 .Hash(_readPreference)
                 .Hash(_replicaSetName)
                 .Hash(_localThreshold)
                 .HashElements(_servers)
+                .Hash(_serverSelectionTimeout)
                 .Hash(_socketTimeout)
                 .Hash(_sslSettings)
                 .Hash(_useSsl)
@@ -703,15 +724,16 @@ namespace MongoDB.Driver
             sb.AppendFormat("MaxConnectionLifeTime={0};", _maxConnectionLifeTime);
             sb.AppendFormat("MaxConnectionPoolSize={0};", _maxConnectionPoolSize);
             sb.AppendFormat("MinConnectionPoolSize={0};", _minConnectionPoolSize);
-            sb.AppendFormat("OperationTimeout={0};", _operationTimeout);
             if (_readEncoding != null)
             {
                 sb.Append("ReadEncoding=UTF8Encoding;");
             }
+            sb.AppendFormat("ReadConcern={0};", _readConcern);
             sb.AppendFormat("ReadPreference={0};", _readPreference);
             sb.AppendFormat("ReplicaSetName={0};", _replicaSetName);
             sb.AppendFormat("LocalThreshold={0};", _localThreshold);
             sb.AppendFormat("Servers={0};", string.Join(",", _servers.Select(s => s.ToString()).ToArray()));
+            sb.AppendFormat("ServerSelectionTimeout={0};", _serverSelectionTimeout);
             sb.AppendFormat("SocketTimeout={0};", _socketTimeout);
             if (_sslSettings != null)
             {
@@ -745,6 +767,7 @@ namespace MongoDB.Driver
                 _minConnectionPoolSize,
                 _replicaSetName,
                 _servers.ToList(),
+                _serverSelectionTimeout,
                 _socketTimeout,
                 _sslSettings,
                 _useSsl,

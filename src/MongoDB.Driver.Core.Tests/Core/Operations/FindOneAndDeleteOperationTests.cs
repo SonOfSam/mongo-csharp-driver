@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+﻿/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ using System.Threading.Tasks;
 using FluentAssertions;
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Serializers;
+using MongoDB.Driver.Core.Misc;
 using NUnit.Framework;
 
 namespace MongoDB.Driver.Core.Operations
@@ -81,15 +82,20 @@ namespace MongoDB.Driver.Core.Operations
         public void CreateCommand_should_create_the_correct_command(
             [Values(null, 10)] int? maxTimeMS,
             [Values(null, "{a: 1}")] string projection,
-            [Values(null, "{b: 1}")] string sort)
+            [Values(null, "{b: 1}")] string sort,
+            [Values(null, "{ w : 2 }")] string writeConcernString,
+            [Values("3.0.0", "3.1.1")] string serverVersionString)
         {
             var projectionDoc = projection == null ? (BsonDocument)null : BsonDocument.Parse(projection);
             var sortDoc = sort == null ? (BsonDocument)null : BsonDocument.Parse(sort);
+            var writeConcern = writeConcernString == null ? null : WriteConcern.FromBsonDocument(BsonDocument.Parse(writeConcernString));
+            var serverVersion = SemanticVersion.Parse(serverVersionString);
             var subject = new FindOneAndDeleteOperation<BsonDocument>(_collectionNamespace, _filter, BsonDocumentSerializer.Instance, _messageEncoderSettings)
             {
                 MaxTime = maxTimeMS.HasValue ? TimeSpan.FromMilliseconds(maxTimeMS.Value) : (TimeSpan?)null,
                 Projection = projectionDoc,
-                Sort = sortDoc
+                Sort = sortDoc,
+                WriteConcern = writeConcern
             };
 
             var expectedResult = new BsonDocument
@@ -99,17 +105,21 @@ namespace MongoDB.Driver.Core.Operations
                 { "sort", sortDoc, sortDoc != null },
                 { "remove", true },
                 { "fields", projectionDoc, projectionDoc != null },
-                { "maxTimeMS", () => maxTimeMS.Value, maxTimeMS.HasValue }
+                { "maxTimeMS", () => maxTimeMS.Value, maxTimeMS.HasValue },
+                { "writeConcern", () => writeConcern.ToBsonDocument(), writeConcern != null && SupportedFeatures.IsFindAndModifyWriteConcernSupported(serverVersion) }
+
             };
 
-            var result = subject.CreateCommand();
+            var result = subject.CreateCommand(serverVersion);
 
             result.Should().Be(expectedResult);
         }
 
         [Test]
         [RequiresServer("EnsureTestData")]
-        public async Task ExecuteAsync_against_an_existing_document()
+        public void Execute_against_an_existing_document(
+            [Values(false, true)]
+            bool async)
         {
             var subject = new FindOneAndDeleteOperation<BsonDocument>(
                 _collectionNamespace,
@@ -117,18 +127,44 @@ namespace MongoDB.Driver.Core.Operations
                 new FindAndModifyValueDeserializer<BsonDocument>(BsonDocumentSerializer.Instance),
                 _messageEncoderSettings);
 
-            var result = await ExecuteOperationAsync(subject);
+            var result = ExecuteOperation(subject, async);
 
             result.Should().Be("{_id: 10, x: 1}");
 
-            var serverList = await ReadAllFromCollectionAsync();
+            var serverList = ReadAllFromCollection(async);
 
             serverList.Should().BeEmpty();
         }
 
         [Test]
+        [RequiresServer("EnsureTestData", MinimumVersion = "3.2.0-rc0", ClusterTypes = ClusterTypes.ReplicaSet)]
+        public void Execute_should_throw_when_there_is_a_write_concern_error(
+            [Values(false, true)] bool async)
+        {
+            var subject = new FindOneAndDeleteOperation<BsonDocument>(
+                _collectionNamespace,
+                BsonDocument.Parse("{ x : 1 }"),
+                new FindAndModifyValueDeserializer<BsonDocument>(BsonDocumentSerializer.Instance),
+                _messageEncoderSettings)
+            {
+                WriteConcern = new WriteConcern(9)
+            };
+
+            Action action = () => ExecuteOperation(subject, async);
+
+            var exception = action.ShouldThrow<MongoWriteConcernException>().Which;
+            var commandResult = exception.Result;
+            var result = commandResult["value"].AsBsonDocument;
+            result.Should().Be("{_id: 10, x: 1}");
+            var serverList = ReadAllFromCollection(async);
+            serverList.Should().BeEmpty();
+        }
+
+        [Test]
         [RequiresServer("EnsureTestData")]
-        public async Task ExecuteAsync_when_document_does_not_exist()
+        public void Execute_when_document_does_not_exist(
+            [Values(false, true)]
+            bool async)
         {
             var subject = new FindOneAndDeleteOperation<BsonDocument>(
                 _collectionNamespace,
@@ -136,11 +172,11 @@ namespace MongoDB.Driver.Core.Operations
                 new FindAndModifyValueDeserializer<BsonDocument>(BsonDocumentSerializer.Instance),
                 _messageEncoderSettings);
 
-            var result = await ExecuteOperationAsync(subject);
+            var result = ExecuteOperation(subject, async);
 
             result.Should().BeNull();
 
-            var serverList = await ReadAllFromCollectionAsync();
+            var serverList = ReadAllFromCollection(async);
 
             serverList.Should().HaveCount(1);
         }

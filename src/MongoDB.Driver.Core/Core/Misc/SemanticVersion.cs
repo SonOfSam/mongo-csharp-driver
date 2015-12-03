@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -51,9 +51,9 @@ namespace MongoDB.Driver.Core.Misc
         /// <param name="preRelease">The pre release version.</param>
         public SemanticVersion(int major, int minor, int patch, string preRelease)
         {
-            _major = Ensure.IsGreaterThanOrEqualToZero(major, "major");
-            _minor = Ensure.IsGreaterThanOrEqualToZero(minor, "minor");
-            _patch = Ensure.IsGreaterThanOrEqualToZero(patch, "patch");
+            _major = Ensure.IsGreaterThanOrEqualToZero(major, nameof(major));
+            _minor = Ensure.IsGreaterThanOrEqualToZero(minor, nameof(minor));
+            _patch = Ensure.IsGreaterThanOrEqualToZero(patch, nameof(patch));
             _preRelease = preRelease; // can be null
         }
 
@@ -128,7 +128,7 @@ namespace MongoDB.Driver.Core.Misc
             {
                 return result;
             }
-            
+
             if (_preRelease == null && other._preRelease == null)
             {
                 return 0;
@@ -209,7 +209,7 @@ namespace MongoDB.Driver.Core.Misc
                 {
                     var major = int.Parse(match.Groups["major"].Value);
                     var minor = int.Parse(match.Groups["minor"].Value);
-                    var patch = int.Parse(match.Groups["patch"].Value);
+                    var patch = match.Groups["patch"].Success ? int.Parse(match.Groups["patch"].Value) : 0;
                     var preRelease = match.Groups["preRelease"].Success ? match.Groups["preRelease"].Value : null;
 
                     result = new SemanticVersion(major, minor, patch, preRelease);

@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 * limitations under the License.
 */
 
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using MongoDB.Bson;
@@ -24,14 +25,31 @@ namespace MongoDB.Driver
     /// </summary>
     public abstract class MongoDatabaseBase : IMongoDatabase
     {
+        // public properties
+        /// <inheritdoc />
+        public abstract IMongoClient Client { get; }
+
         /// <inheritdoc />
         public abstract DatabaseNamespace DatabaseNamespace { get; }
 
         /// <inheritdoc />
         public abstract MongoDatabaseSettings Settings { get; }
 
+        // public methods
+        /// <inheritdoc />
+        public virtual void CreateCollection(string name, CreateCollectionOptions options = null, CancellationToken cancellationToken = default(CancellationToken))
+        {
+            throw new NotImplementedException();
+        }
+
         /// <inheritdoc />
         public abstract Task CreateCollectionAsync(string name, CreateCollectionOptions options = null, CancellationToken cancellationToken = default(CancellationToken));
+
+        /// <inheritdoc />
+        public virtual void DropCollection(string name, CancellationToken cancellationToken = default(CancellationToken))
+        {
+            throw new NotImplementedException();
+        }
 
         /// <inheritdoc />
         public abstract Task DropCollectionAsync(string name, CancellationToken cancellationToken = default(CancellationToken));
@@ -40,10 +58,28 @@ namespace MongoDB.Driver
         public abstract IMongoCollection<TDocument> GetCollection<TDocument>(string name, MongoCollectionSettings settings = null);
 
         /// <inheritdoc />
+        public virtual IAsyncCursor<BsonDocument> ListCollections(ListCollectionsOptions options = null, CancellationToken cancellationToken = default(CancellationToken))
+        {
+            throw new NotImplementedException();
+        }
+
+        /// <inheritdoc />
         public abstract Task<IAsyncCursor<BsonDocument>> ListCollectionsAsync(ListCollectionsOptions options = null, CancellationToken cancellationToken = default(CancellationToken));
 
         /// <inheritdoc />
+        public virtual void RenameCollection(string oldName, string newName, RenameCollectionOptions options = null, CancellationToken cancellationToken = default(CancellationToken))
+        {
+            throw new NotImplementedException();
+        }
+
+        /// <inheritdoc />
         public abstract Task RenameCollectionAsync(string oldName, string newName, RenameCollectionOptions options = null, CancellationToken cancellationToken = default(CancellationToken));
+
+        /// <inheritdoc />
+        public virtual TResult RunCommand<TResult>(Command<TResult> command, ReadPreference readPreference = null, CancellationToken cancellationToken = default(CancellationToken))
+        {
+            throw new NotImplementedException();
+        }
 
         /// <inheritdoc />
         public abstract Task<TResult> RunCommandAsync<TResult>(Command<TResult> command, ReadPreference readPreference = null, CancellationToken cancellationToken = default(CancellationToken));

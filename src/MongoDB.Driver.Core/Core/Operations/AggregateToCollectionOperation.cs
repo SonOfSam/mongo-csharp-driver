@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -33,6 +33,7 @@ namespace MongoDB.Driver.Core.Operations
     {
         // fields
         private bool? _allowDiskUse;
+        private bool? _bypassDocumentValidation;
         private readonly CollectionNamespace _collectionNamespace;
         private TimeSpan? _maxTime;
         private readonly MessageEncoderSettings _messageEncoderSettings;
@@ -47,9 +48,9 @@ namespace MongoDB.Driver.Core.Operations
         /// <param name="messageEncoderSettings">The message encoder settings.</param>
         public AggregateToCollectionOperation(CollectionNamespace collectionNamespace, IEnumerable<BsonDocument> pipeline, MessageEncoderSettings messageEncoderSettings)
         {
-            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, "collectionNamespace");
-            _pipeline = Ensure.IsNotNull(pipeline, "pipeline").ToList();
-            _messageEncoderSettings = Ensure.IsNotNull(messageEncoderSettings, "messageEncoderSettings");
+            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, nameof(collectionNamespace));
+            _pipeline = Ensure.IsNotNull(pipeline, nameof(pipeline)).ToList();
+            _messageEncoderSettings = Ensure.IsNotNull(messageEncoderSettings, nameof(messageEncoderSettings));
 
             EnsureIsOutputToCollectionPipeline();
         }
@@ -65,6 +66,18 @@ namespace MongoDB.Driver.Core.Operations
         {
             get { return _allowDiskUse; }
             set { _allowDiskUse = value; }
+        }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether to bypass document validation.
+        /// </summary>
+        /// <value>
+        /// A value indicating whether to bypass document validation.
+        /// </value>
+        public bool? BypassDocumentValidation
+        {
+            get { return _bypassDocumentValidation; }
+            set { _bypassDocumentValidation = value; }
         }
 
         /// <summary>
@@ -114,24 +127,49 @@ namespace MongoDB.Driver.Core.Operations
 
         // methods
         /// <inheritdoc/>
-        public Task<BsonDocument> ExecuteAsync(IWriteBinding binding, CancellationToken cancellationToken)
+        public BsonDocument Execute(IWriteBinding binding, CancellationToken cancellationToken)
         {
-            Ensure.IsNotNull(binding, "binding");
+            Ensure.IsNotNull(binding, nameof(binding));
 
-            var command = CreateCommand();
-            var operation = new WriteCommandOperation<BsonDocument>(CollectionNamespace.DatabaseNamespace, command, BsonDocumentSerializer.Instance, MessageEncoderSettings);
-            return operation.ExecuteAsync(binding, cancellationToken);
+            using (var channelSource = binding.GetWriteChannelSource(cancellationToken))
+            using (var channel = channelSource.GetChannel(cancellationToken))
+            using (var channelBinding = new ChannelReadWriteBinding(channelSource.Server, channel))
+            {
+                var operation = CreateOperation(channel.ConnectionDescription.ServerVersion);
+                return operation.Execute(channelBinding, cancellationToken);
+            }
         }
 
-        internal BsonDocument CreateCommand()
+        /// <inheritdoc/>
+        public async Task<BsonDocument> ExecuteAsync(IWriteBinding binding, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNull(binding, nameof(binding));
+
+            using (var channelSource = await binding.GetWriteChannelSourceAsync(cancellationToken).ConfigureAwait(false))
+            using (var channel = await channelSource.GetChannelAsync(cancellationToken).ConfigureAwait(false))
+            using (var channelBinding = new ChannelReadWriteBinding(channelSource.Server, channel))
+            {
+                var operation = CreateOperation(channel.ConnectionDescription.ServerVersion);
+                return await operation.ExecuteAsync(channelBinding, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        internal BsonDocument CreateCommand(SemanticVersion serverVersion)
         {
             return new BsonDocument
             {
                 { "aggregate", _collectionNamespace.CollectionName },
                 { "pipeline", new BsonArray(_pipeline) },
                 { "allowDiskUse", () => _allowDiskUse.Value, _allowDiskUse.HasValue },
+                { "bypassDocumentValidation", () => _bypassDocumentValidation.Value, _bypassDocumentValidation.HasValue && SupportedFeatures.IsBypassDocumentValidationSupported(serverVersion) },
                 { "maxTimeMS", () => _maxTime.Value.TotalMilliseconds, _maxTime.HasValue }
             };
+        }
+
+        private WriteCommandOperation<BsonDocument> CreateOperation(SemanticVersion serverVersion)
+        {
+            var command = CreateCommand(serverVersion);
+            return new WriteCommandOperation<BsonDocument>(CollectionNamespace.DatabaseNamespace, command, BsonDocumentSerializer.Instance, MessageEncoderSettings);
         }
 
         private void EnsureIsOutputToCollectionPipeline()

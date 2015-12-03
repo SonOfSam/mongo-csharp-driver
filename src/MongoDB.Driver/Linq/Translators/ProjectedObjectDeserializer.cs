@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
 * limitations under the License.
 */
 
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using MongoDB.Bson;
@@ -23,7 +22,7 @@ using MongoDB.Bson.Serialization.Serializers;
 
 namespace MongoDB.Driver.Linq.Translators
 {
-    internal class ProjectedObjectDeserializer : SerializerBase<ProjectedObject>, IBsonDocumentSerializer
+    internal sealed class ProjectedObjectDeserializer : SerializerBase<ProjectedObject>, IBsonDocumentSerializer
     {
         private readonly Dictionary<string, BsonSerializationInfo> _deserializationMap;
 
@@ -39,26 +38,6 @@ namespace MongoDB.Driver.Linq.Translators
             return obj;
         }
 
-        public BsonSerializationInfo GetMemberSerializationInfo(string memberName)
-        {
-            BsonSerializationInfo found;
-            if (_deserializationMap.TryGetValue(memberName, out found))
-            {
-                return found;
-            }
-
-            // TODO: this is the wrong exception type, but it's what is used in BsonClassMapSerializer
-            throw new ArgumentOutOfRangeException("memberName", "No member found by the name of " + memberName);
-        }
-
-        /// <summary>
-        /// Tries to get the serialization info for a member.
-        /// </summary>
-        /// <param name="memberName">Name of the member.</param>
-        /// <param name="serializationInfo">The serialization information.</param>
-        /// <returns>
-        ///   <c>true</c> if the serialization info exists; otherwise <c>false</c>.
-        /// </returns>
         public bool TryGetMemberSerializationInfo(string memberName, out BsonSerializationInfo serializationInfo)
         {
             return _deserializationMap.TryGetValue(memberName, out serializationInfo);

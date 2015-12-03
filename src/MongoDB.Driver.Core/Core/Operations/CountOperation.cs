@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -36,6 +36,7 @@ namespace MongoDB.Driver.Core.Operations
         private long? _limit;
         private TimeSpan? _maxTime;
         private readonly MessageEncoderSettings _messageEncoderSettings;
+        private ReadConcern _readConcern = ReadConcern.Default;
         private long? _skip;
 
         // constructors
@@ -46,8 +47,8 @@ namespace MongoDB.Driver.Core.Operations
         /// <param name="messageEncoderSettings">The message encoder settings.</param>
         public CountOperation(CollectionNamespace collectionNamespace, MessageEncoderSettings messageEncoderSettings)
         {
-            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, "collectionNamespace");
-            _messageEncoderSettings = Ensure.IsNotNull(messageEncoderSettings, "messageEncoderSettings");
+            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, nameof(collectionNamespace));
+            _messageEncoderSettings = Ensure.IsNotNull(messageEncoderSettings, nameof(messageEncoderSettings));
         }
 
         // properties
@@ -107,7 +108,7 @@ namespace MongoDB.Driver.Core.Operations
         public TimeSpan? MaxTime
         {
             get { return _maxTime; }
-            set { _maxTime = Ensure.IsNullOrInfiniteOrGreaterThanOrEqualToZero(value, "value"); }
+            set { _maxTime = Ensure.IsNullOrInfiniteOrGreaterThanOrEqualToZero(value, nameof(value)); }
         }
 
         /// <summary>
@@ -119,6 +120,18 @@ namespace MongoDB.Driver.Core.Operations
         public MessageEncoderSettings MessageEncoderSettings
         {
             get { return _messageEncoderSettings; }
+        }
+
+        /// <summary>
+        /// Gets or sets the read concern.
+        /// </summary>
+        /// <value>
+        /// The read concern.
+        /// </value>
+        public ReadConcern ReadConcern
+        {
+            get { return _readConcern; }
+            set { _readConcern = Ensure.IsNotNull(value, nameof(value)); }
         }
 
         /// <summary>
@@ -134,8 +147,10 @@ namespace MongoDB.Driver.Core.Operations
         }
 
         // methods
-        internal BsonDocument CreateCommand()
+        internal BsonDocument CreateCommand(SemanticVersion serverVersion)
         {
+            _readConcern.ThrowIfNotSupported(serverVersion);
+
             return new BsonDocument
             {
                 { "count", _collectionNamespace.CollectionName },
@@ -143,34 +158,43 @@ namespace MongoDB.Driver.Core.Operations
                 { "limit", () => _limit.Value, _limit.HasValue },
                 { "skip", () => _skip.Value, _skip.HasValue },
                 { "hint", _hint, _hint != null },
-                { "maxTimeMS", () => _maxTime.Value.TotalMilliseconds, _maxTime.HasValue }
+                { "maxTimeMS", () => _maxTime.Value.TotalMilliseconds, _maxTime.HasValue },
+                { "readConcern", () => _readConcern.ToBsonDocument(), !_readConcern.IsServerDefault }
             };
+        }
+
+        /// <inheritdoc/>
+        public long Execute(IReadBinding binding, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNull(binding, nameof(binding));
+            using (var channelSource = binding.GetReadChannelSource(cancellationToken))
+            using (var channel = channelSource.GetChannel(cancellationToken))
+            using (var channelBinding = new ChannelReadBinding(channelSource.Server, channel, binding.ReadPreference))
+            {
+                var operation = CreateOperation(channel.ConnectionDescription.ServerVersion);
+                var document = operation.Execute(channelBinding, cancellationToken);
+                return document["n"].ToInt64();
+            }
         }
 
         /// <inheritdoc/>
         public async Task<long> ExecuteAsync(IReadBinding binding, CancellationToken cancellationToken)
         {
-            Ensure.IsNotNull(binding, "binding");
-            var command = CreateCommand();
-            var operation = new ReadCommandOperation<BsonDocument>(_collectionNamespace.DatabaseNamespace, command, BsonDocumentSerializer.Instance, _messageEncoderSettings);
-            var document = await operation.ExecuteAsync(binding, cancellationToken).ConfigureAwait(false);
-            return document["n"].ToInt64();
+            Ensure.IsNotNull(binding, nameof(binding));
+            using (var channelSource = await binding.GetReadChannelSourceAsync(cancellationToken).ConfigureAwait(false))
+            using (var channel = await channelSource.GetChannelAsync(cancellationToken).ConfigureAwait(false))
+            using (var channelBinding = new ChannelReadBinding(channelSource.Server, channel, binding.ReadPreference))
+            {
+                var operation = CreateOperation(channel.ConnectionDescription.ServerVersion);
+                var document = await operation.ExecuteAsync(channelBinding, cancellationToken).ConfigureAwait(false);
+                return document["n"].ToInt64();
+            }
         }
 
-        /// <summary>
-        /// Returns an explain operation for this count operation.
-        /// </summary>
-        /// <param name="verbosity">The verbosity.</param>
-        /// <returns>An explain operation.</returns>
-        public IReadOperation<BsonDocument> ToExplainOperation(ExplainVerbosity verbosity)
+        private ReadCommandOperation<BsonDocument> CreateOperation(SemanticVersion serverVersion)
         {
-            return new ExplainOperation(
-                _collectionNamespace.DatabaseNamespace,
-                CreateCommand(),
-                _messageEncoderSettings)
-            {
-                Verbosity = verbosity
-            };
+            var command = CreateCommand(serverVersion);
+            return new ReadCommandOperation<BsonDocument>(_collectionNamespace.DatabaseNamespace, command, BsonDocumentSerializer.Instance, _messageEncoderSettings);
         }
     }
 }

@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -14,6 +14,8 @@
 */
 
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
@@ -23,7 +25,9 @@ using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Serializers;
 using MongoDB.Driver.Core.Bindings;
 using MongoDB.Driver.Core.Clusters;
+using MongoDB.Driver.Core.Clusters.ServerSelectors;
 using MongoDB.Driver.Core.Configuration;
+using MongoDB.Driver.Core.Events.Diagnostics;
 using MongoDB.Driver.Core.Misc;
 using MongoDB.Driver.Core.Operations;
 using MongoDB.Driver.Core.Servers;
@@ -40,6 +44,7 @@ namespace MongoDB.Driver
         private static ConnectionString __connectionString = GetConnectionString();
         private static DatabaseNamespace __databaseNamespace = GetDatabaseNamespace();
         private static MessageEncoderSettings __messageEncoderSettings = new MessageEncoderSettings();
+        private static TraceSource __traceSource;
 
         // static properties
         public static ICluster Cluster
@@ -66,16 +71,33 @@ namespace MongoDB.Driver
         {
             get
             {
-                var writableServerDescription = __cluster.Value.Description.Servers.FirstOrDefault(
-                    description => description.Type.IsWritable());
-                return writableServerDescription.Version;
+                var server = __cluster.Value.SelectServer(WritableServerSelector.Instance, CancellationToken.None);
+                return server.Description.Version;
             }
+        }
+
+        public static TraceSource TraceSource
+        {
+            get { return __traceSource; }
         }
 
         // static methods
         public static ClusterBuilder ConfigureCluster()
         {
-            var builder = new ClusterBuilder().ConfigureWithConnectionString(__connectionString);
+            return ConfigureCluster(new ClusterBuilder());
+        }
+
+        public static ClusterBuilder ConfigureCluster(ClusterBuilder builder)
+        {
+            var serverSelectionTimeoutString = Environment.GetEnvironmentVariable("MONGO_SERVER_SELECTION_TIMEOUT_MS");
+            if (serverSelectionTimeoutString == null)
+            {
+                serverSelectionTimeoutString = "30000";
+            }
+
+            builder = builder
+                .ConfigureWithConnectionString(__connectionString)
+                .ConfigureCluster(c => c.With(serverSelectionTimeout: TimeSpan.FromMilliseconds(int.Parse(serverSelectionTimeoutString))));
 
             if (__connectionString.Ssl.HasValue && __connectionString.Ssl.Value)
             {
@@ -100,29 +122,67 @@ namespace MongoDB.Driver
                 }
             }
 
-            return builder;
+            return ConfigureLogging(builder);
+        }
+
+        public static ClusterBuilder ConfigureLogging(ClusterBuilder builder)
+        {
+            var environmentVariable = Environment.GetEnvironmentVariable("MONGO_LOGGING");
+            if (environmentVariable == null)
+            {
+                return builder;
+            }
+
+            SourceLevels defaultLevel;
+            if (!Enum.TryParse<SourceLevels>(environmentVariable, ignoreCase: true, result: out defaultLevel))
+            {
+                return builder;
+            }
+
+            __traceSource = new TraceSource("mongodb-tests", defaultLevel);
+            __traceSource.Listeners.Clear(); // remove the default listener
+            var listener = new ConsoleTraceListener();
+            listener.TraceOutputOptions = TraceOptions.DateTime;
+            __traceSource.Listeners.Add(listener);
+            return builder.TraceWith(__traceSource);
         }
 
         public static ICluster CreateCluster()
         {
-            var hasWritableServer = false;
+            var hasWritableServer = 0;
             var builder = ConfigureCluster();
             var cluster = builder.BuildCluster();
             cluster.DescriptionChanged += (o, e) =>
             {
-                hasWritableServer = e.NewClusterDescription.Servers.Any(
+                var anyWritableServer = e.NewClusterDescription.Servers.Any(
                     description => description.Type.IsWritable());
+                if (__traceSource != null)
+                {
+                    __traceSource.TraceEvent(TraceEventType.Information, 0, $"CreateCluster: DescriptionChanged event handler called.");
+                    __traceSource.TraceEvent(TraceEventType.Information, 0, $"CreateCluster: anyWritableServer = {anyWritableServer}.");
+                    __traceSource.TraceEvent(TraceEventType.Information, 0, $"CreateCluster: new description: {e.NewClusterDescription.ToString()}.");
+                }
+                Interlocked.Exchange(ref hasWritableServer, anyWritableServer ? 1 : 0);
             };
+            if (__traceSource != null)
+            {
+                __traceSource.TraceEvent(TraceEventType.Information, 0, "CreateCluster: initializing cluster.");
+            }
             cluster.Initialize();
 
             // wait until the cluster has connected to a writable server
-            SpinWait.SpinUntil(() => hasWritableServer, TimeSpan.FromSeconds(30));
-            if (!hasWritableServer)
+            SpinWait.SpinUntil(() => Interlocked.CompareExchange(ref hasWritableServer, 0, 0) != 0, TimeSpan.FromSeconds(30));
+            if (Interlocked.CompareExchange(ref hasWritableServer, 0, 0) == 0)
             {
                 var message = string.Format(
                     "Test cluster has no writable server. Client view of the cluster is {0}.",
                     cluster.Description.ToString());
                 throw new Exception(message);
+            }
+
+            if (__traceSource != null)
+            {
+                __traceSource.TraceEvent(TraceEventType.Information, 0, "CreateCluster: writable server found.");
             }
 
             return cluster;
@@ -149,6 +209,11 @@ namespace MongoDB.Driver
 
         private static DatabaseNamespace GetDatabaseNamespace()
         {
+            if (!string.IsNullOrEmpty(__connectionString.DatabaseName))
+            {
+                return new DatabaseNamespace(__connectionString.DatabaseName);
+            }
+
             var timestamp = DateTime.Now.ToString("MMddHHmm");
             return new DatabaseNamespace("Tests" + timestamp);
         }
@@ -157,6 +222,10 @@ namespace MongoDB.Driver
         {
             var testFixtureType = GetTestFixtureTypeFromCallStack();
             var databaseName = TruncateDatabaseNameIfTooLong(__databaseNamespace.DatabaseName + "-" + testFixtureType.Name);
+            if (databaseName.Length >= 64)
+            {
+                databaseName = databaseName.Substring(0, 63);
+            }
             return new DatabaseNamespace(databaseName);
         }
 
@@ -175,13 +244,32 @@ namespace MongoDB.Driver
             return new WritableServerBinding(__cluster.Value);
         }
 
+        public static IEnumerable<string> GetModules()
+        {
+            using (var binding = GetReadBinding())
+            {
+                var command = new BsonDocument("buildinfo", 1);
+                var operation = new ReadCommandOperation<BsonDocument>(DatabaseNamespace.Admin, command, BsonDocumentSerializer.Instance, __messageEncoderSettings);
+                var response = operation.Execute(binding, CancellationToken.None);
+                BsonValue modules;
+                if (response.TryGetValue("modules", out modules))
+                {
+                    return modules.AsBsonArray.Select(x => x.ToString());
+                }
+                else
+                {
+                    return Enumerable.Empty<string>();
+                }
+            }
+        }
+
         public static string GetStorageEngine()
         {
             using (var binding = GetReadWriteBinding())
             {
                 var command = new BsonDocument("serverStatus", 1);
                 var operation = new ReadCommandOperation<BsonDocument>(DatabaseNamespace.Admin, command, BsonDocumentSerializer.Instance, __messageEncoderSettings);
-                var response = operation.ExecuteAsync(binding, CancellationToken.None).GetAwaiter().GetResult();
+                var response = operation.Execute(binding, CancellationToken.None);
                 BsonValue storageEngine;
                 if (response.TryGetValue("storageEngine", out storageEngine) && storageEngine.AsBsonDocument.Contains("name"))
                 {
@@ -271,7 +359,7 @@ namespace MongoDB.Driver
 
             using (var binding = GetReadWriteBinding())
             {
-                operation.ExecuteAsync(binding, CancellationToken.None).GetAwaiter().GetResult();
+                operation.Execute(binding, CancellationToken.None);
             }
         }
 
@@ -279,7 +367,8 @@ namespace MongoDB.Driver
         {
             if (__cluster.IsValueCreated)
             {
-                DropDatabase();
+                // TODO: DropDatabase
+                //DropDatabase();
                 __cluster.Value.Dispose();
                 __cluster = new Lazy<ICluster>(CreateCluster, isThreadSafe: true);
             }

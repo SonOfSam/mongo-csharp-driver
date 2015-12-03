@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -150,6 +150,25 @@ namespace MongoDB.Driver.Core.Operations
         }
 
         [Test]
+        public void CreateCommand_should_return_expected_result_when_IndexOptionDefaults_is_set()
+        {
+            var value = new BsonDocument("storageEngine", new BsonDocument("x", 1));
+            var subject = new CreateCollectionOperation(_collectionNamespace, _messageEncoderSettings)
+            {
+                IndexOptionDefaults = value
+            };
+            var expectedResult = new BsonDocument
+            {
+                { "create", _collectionNamespace.CollectionName },
+                { "indexOptionDefaults", value }
+            };
+
+            var result = subject.CreateCommand();
+
+            result.Should().Be(expectedResult);
+        }
+
+        [Test]
         public void CreateCommand_should_return_expected_result_when_MaxDocuments_is_set(
             [Values(1, 2)]
             long maxDocuments)
@@ -231,27 +250,90 @@ namespace MongoDB.Driver.Core.Operations
         }
 
         [Test]
+        public void CreateCommand_should_return_expected_result_when_ValidationAction_is_set(
+            [Values(DocumentValidationAction.Error, DocumentValidationAction.Warn)]
+            DocumentValidationAction value)
+        {
+            var subject = new CreateCollectionOperation(_collectionNamespace, _messageEncoderSettings)
+            {
+                ValidationAction = value
+            };
+            var expectedResult = new BsonDocument
+            {
+                { "create", _collectionNamespace.CollectionName },
+                { "validationAction", value.ToString().ToLowerInvariant() }
+            };
+
+            var result = subject.CreateCommand();
+
+            result.Should().Be(expectedResult);
+        }
+
+        [Test]
+        public void CreateCommand_should_return_expected_result_when_ValidationLevel_is_set(
+            [Values(DocumentValidationLevel.Moderate, DocumentValidationLevel.Off)]
+            DocumentValidationLevel value)
+        {
+            var subject = new CreateCollectionOperation(_collectionNamespace, _messageEncoderSettings)
+            {
+                ValidationLevel = value
+            };
+            var expectedResult = new BsonDocument
+            {
+                { "create", _collectionNamespace.CollectionName },
+                { "validationLevel", value.ToString().ToLowerInvariant() }
+            };
+
+            var result = subject.CreateCommand();
+
+            result.Should().Be(expectedResult);
+        }
+
+        [Test]
+        public void CreateCommand_should_return_expected_result_when_Validator_is_set()
+        {
+            var value = new BsonDocument("x", 1);
+            var subject = new CreateCollectionOperation(_collectionNamespace, _messageEncoderSettings)
+            {
+                Validator = value
+            };
+            var expectedResult = new BsonDocument
+            {
+                { "create", _collectionNamespace.CollectionName },
+                { "validator", value }
+            };
+
+            var result = subject.CreateCommand();
+
+            result.Should().Be(expectedResult);
+        }
+
+        [Test]
         [RequiresServer("DropCollection")]
-        public async Task ExecuteAsync_should_create_collection()
+        public void Execute_should_create_collection(
+            [Values(false, true)]
+            bool async)
         {
             var subject = new CreateCollectionOperation(_collectionNamespace, _messageEncoderSettings);
 
             using (var binding = CoreTestConfiguration.GetReadWriteBinding())
             {
-                var result = await subject.ExecuteAsync(binding, CancellationToken.None);
+                var result = ExecuteOperation(subject, binding, async);
 
                 result["ok"].ToBoolean().Should().BeTrue();
 
-                var stats = await GetCollectionStatsAsync(binding);
+                var stats = GetCollectionStats(binding, async);
                 stats["ns"].ToString().Should().Be(_collectionNamespace.FullName);
             }
         }
 
         [Test]
         [RequiresServer("DropCollection")]
-        public async Task ExecuteAsync_should_create_collection_when_AutoIndexId_is_set(
+        public void Execute_should_create_collection_when_AutoIndexId_is_set(
             [Values(false, true)]
-            bool autoIndexId)
+            bool autoIndexId,
+            [Values(false, true)]
+            bool async)
         {
             var subject = new CreateCollectionOperation(_collectionNamespace, _messageEncoderSettings)
             {
@@ -260,13 +342,22 @@ namespace MongoDB.Driver.Core.Operations
 
             using (var binding = CoreTestConfiguration.GetReadWriteBinding())
             {
-                var result = await subject.ExecuteAsync(binding, CancellationToken.None);
+                var result = ExecuteOperation(subject, binding, async);
 
                 result["ok"].ToBoolean().Should().BeTrue();
 
                 var listIndexesOperation = new ListIndexesOperation(_collectionNamespace, _messageEncoderSettings);
-                var cursor = await listIndexesOperation.ExecuteAsync(binding, CancellationToken.None);
-                var indexes = await cursor.ToListAsync();
+                List<BsonDocument> indexes;
+                if (async)
+                {
+                    var cursor = listIndexesOperation.ExecuteAsync(binding, CancellationToken.None).GetAwaiter().GetResult();
+                    indexes = cursor.ToListAsync().GetAwaiter().GetResult();
+                }
+                else
+                {
+                    var cursor = listIndexesOperation.Execute(binding, CancellationToken.None);
+                    indexes = cursor.ToList();
+                }
 
                 indexes.Count.Should().Be(autoIndexId ? 1 : 0);
             }
@@ -274,9 +365,11 @@ namespace MongoDB.Driver.Core.Operations
 
         [Test]
         [RequiresServer("DropCollection")]
-        public async Task ExecuteAsync_should_create_collection_when_Capped_is_set(
+        public void Execute_should_create_collection_when_Capped_is_set(
             [Values(false, true)]
-            bool capped)
+            bool capped,
+            [Values(false, true)]
+            bool async)
         {
             var maxSize = capped ? (long?)10000 : null;
             var subject = new CreateCollectionOperation(_collectionNamespace, _messageEncoderSettings)
@@ -287,19 +380,43 @@ namespace MongoDB.Driver.Core.Operations
 
             using (var binding = CoreTestConfiguration.GetReadWriteBinding())
             {
-                var result = await subject.ExecuteAsync(binding, CancellationToken.None);
+                var result = ExecuteOperation(subject, binding, async);
 
                 result["ok"].ToBoolean().Should().BeTrue();
 
-                var stats = await GetCollectionStatsAsync(binding);
+                var stats = GetCollectionStats(binding, async);
                 stats["ns"].ToString().Should().Be(_collectionNamespace.FullName);
                 stats.GetValue("capped", false).ToBoolean().Should().Be(capped);
             }
         }
 
         [Test]
+        [RequiresServer("DropCollection", MinimumVersion = "3.2.0-rc0")]
+        public void Execute_should_create_collection_when_IndexOptionDefaults_is_set(
+           [Values(false, true)] bool async)
+        {
+            var storageEngineOptions = new BsonDocument("mmapv1", new BsonDocument());
+            var indexOptionDefaults = new BsonDocument("storageEngine", storageEngineOptions);
+            var subject = new CreateCollectionOperation(_collectionNamespace, _messageEncoderSettings)
+            {
+                IndexOptionDefaults = indexOptionDefaults
+            };
+
+            using (var binding = CoreTestConfiguration.GetReadWriteBinding())
+            {
+                var result = ExecuteOperation(subject, binding, async);
+
+                result["ok"].ToBoolean().Should().BeTrue();
+                var collectionInfo = GetCollectionInfo(binding, _collectionNamespace.CollectionName);
+                Assert.That(collectionInfo["options"]["indexOptionDefaults"], Is.EqualTo(indexOptionDefaults));
+            }
+        }
+
+        [Test]
         [RequiresServer("DropCollection")]
-        public async Task ExecuteAsync_should_create_collection_when_MaxDocuments_is_set()
+        public void Execute_should_create_collection_when_MaxDocuments_is_set(
+            [Values(false, true)]
+            bool async)
         {
             var maxDocuments = 123L;
             var subject = new CreateCollectionOperation(_collectionNamespace, _messageEncoderSettings)
@@ -311,11 +428,11 @@ namespace MongoDB.Driver.Core.Operations
 
             using (var binding = CoreTestConfiguration.GetReadWriteBinding())
             {
-                var result = await subject.ExecuteAsync(binding, CancellationToken.None);
+                var result = ExecuteOperation(subject, binding, async);
 
                 result["ok"].ToBoolean().Should().BeTrue();
 
-                var stats = await GetCollectionStatsAsync(binding);
+                var stats = GetCollectionStats(binding, async);
                 stats["ns"].ToString().Should().Be(_collectionNamespace.FullName);
                 stats["capped"].ToBoolean().Should().BeTrue();
                 stats["max"].ToInt64().Should().Be(maxDocuments);
@@ -324,7 +441,9 @@ namespace MongoDB.Driver.Core.Operations
 
         [Test]
         [RequiresServer("DropCollection")]
-        public async Task ExecuteAsync_should_create_collection_when_MaxSize_is_set()
+        public void Execute_should_create_collection_when_MaxSize_is_set(
+            [Values(false, true)]
+            bool async)
         {
             var maxSize = 10000L;
             var subject = new CreateCollectionOperation(_collectionNamespace, _messageEncoderSettings)
@@ -335,11 +454,11 @@ namespace MongoDB.Driver.Core.Operations
 
             using (var binding = CoreTestConfiguration.GetReadWriteBinding())
             {
-                var result = await subject.ExecuteAsync(binding, CancellationToken.None);
+                var result = ExecuteOperation(subject, binding, async);
 
                 result["ok"].ToBoolean().Should().BeTrue();
 
-                var stats = await GetCollectionStatsAsync(binding);
+                var stats = GetCollectionStats(binding, async);
                 stats["ns"].ToString().Should().Be(_collectionNamespace.FullName);
                 stats["capped"].ToBoolean().Should().BeTrue();
                 // TODO: not sure how to verify that the maxSize took effect
@@ -348,9 +467,11 @@ namespace MongoDB.Driver.Core.Operations
 
         [Test]
         [RequiresServer("DropCollection", StorageEngines = "mmapv1", ClusterTypes = ClusterTypes.StandaloneOrReplicaSet)]
-        public async Task ExecuteAsync_should_create_collection_when_UsePowerOf2Sizes_is_set(
+        public void Execute_should_create_collection_when_UsePowerOf2Sizes_is_set(
             [Values(false, true)]
-            bool usePowerOf2Sizes)
+            bool usePowerOf2Sizes,
+            [Values(false, true)]
+            bool async)
         {
             var subject = new CreateCollectionOperation(_collectionNamespace, _messageEncoderSettings)
             {
@@ -359,14 +480,50 @@ namespace MongoDB.Driver.Core.Operations
 
             using (var binding = CoreTestConfiguration.GetReadWriteBinding())
             {
-                var result = await subject.ExecuteAsync(binding, CancellationToken.None);
+                var result = ExecuteOperation(subject, binding, async);
 
                 result["ok"].ToBoolean().Should().BeTrue();
 
-                var stats = await GetCollectionStatsAsync(binding);
+                var stats = GetCollectionStats(binding, async);
                 stats["ns"].ToString().Should().Be(_collectionNamespace.FullName);
                 stats["userFlags"].ToInt32().Should().Be(usePowerOf2Sizes ? 1 : 0);
             }
+        }
+
+        [Test]
+        [RequiresServer("DropCollection", MinimumVersion = "3.2.0-rc0")]
+        public void Execute_should_create_collection_when_Validator_is_set(
+            [Values(false, true)] bool async)
+        {
+            var subject = new CreateCollectionOperation(_collectionNamespace, _messageEncoderSettings)
+            {
+                ValidationAction = DocumentValidationAction.Error,
+                ValidationLevel = DocumentValidationLevel.Strict,
+                Validator = new BsonDocument("_id", new BsonDocument("$exists", true))
+            };
+
+            using (var binding = CoreTestConfiguration.GetReadWriteBinding())
+            {
+                var result = ExecuteOperation(subject, binding, async);
+
+                result["ok"].ToBoolean().Should().BeTrue();
+                var collectionInfo = GetCollectionInfo(binding, _collectionNamespace.CollectionName);
+                Assert.That(collectionInfo["options"]["validator"], Is.EqualTo(new BsonDocument("_id", new BsonDocument("$exists", true))));
+                Assert.That(collectionInfo["options"]["validationAction"].AsString, Is.EqualTo("error"));
+                Assert.That(collectionInfo["options"]["validationLevel"].AsString, Is.EqualTo("strict"));
+            }
+        }
+
+        [Test]
+        public void IndexOptionDefaults_should_work()
+        {
+            var subject = new CreateCollectionOperation(_collectionNamespace, _messageEncoderSettings);
+            var value = new BsonDocument("storageEngine", new BsonDocument("x", 1));
+            subject.IndexOptionDefaults.Should().BeNull();
+
+            subject.IndexOptionDefaults = value;
+
+            subject.IndexOptionDefaults.Should().Be(value);
         }
 
         [Test]
@@ -434,8 +591,48 @@ namespace MongoDB.Driver.Core.Operations
             subject.UsePowerOf2Sizes.Should().BeTrue();
         }
 
+        [Test]
+        public void ValidationAction_should_work(
+            [Values(null, DocumentValidationAction.Error, DocumentValidationAction.Warn)]
+            DocumentValidationAction? value)
+        {
+            var subject = new CreateCollectionOperation(_collectionNamespace, _messageEncoderSettings);
+            subject.ValidationAction.Should().BeNull();
+
+            subject.ValidationAction = value;
+
+            subject.ValidationAction.Should().Be(value);
+        }
+
+        [Test]
+        public void ValidationLevel_should_work(
+            [Values(null, DocumentValidationLevel.Moderate, DocumentValidationLevel.Off)]
+            DocumentValidationLevel? value)
+        {
+            var subject = new CreateCollectionOperation(_collectionNamespace, _messageEncoderSettings);
+            subject.ValidationLevel.Should().BeNull();
+
+            subject.ValidationLevel = value;
+
+            subject.ValidationLevel.Should().Be(value);
+        }
+
+        [Test]
+        public void Validator_should_work(
+            [Values(null, "{ x : 1 }")]
+            string json)
+        {
+            var subject = new CreateCollectionOperation(_collectionNamespace, _messageEncoderSettings);
+            var value = json == null ? null : BsonDocument.Parse(json);
+            subject.Validator.Should().BeNull();
+
+            subject.Validator = value;
+
+            subject.Validator.Should().Be(value);
+        }
+
         // helper methods
-        public void DropCollection()
+        private void DropCollection()
         {
             var operation = new DropCollectionOperation(_collectionNamespace, _messageEncoderSettings);
 
@@ -445,7 +642,30 @@ namespace MongoDB.Driver.Core.Operations
             }
         }
 
-        public Task<BsonDocument> GetCollectionStatsAsync(IReadBinding binding)
+        private BsonDocument GetCollectionInfo(IReadBinding binding, string collectionName)
+        {
+            var commandOperation = new ReadCommandOperation<BsonDocument>(
+                _collectionNamespace.DatabaseNamespace,
+                new BsonDocument("listCollections", 1),
+                BsonDocumentSerializer.Instance,
+                new MessageEncoderSettings());
+            var commandResult = commandOperation.Execute(binding, CancellationToken.None);
+            return commandResult["cursor"]["firstBatch"].AsBsonArray.Where(c => c["name"] == _collectionNamespace.CollectionName).Single().AsBsonDocument;
+        }
+
+        private BsonDocument ExecuteOperation(CreateCollectionOperation subject, IWriteBinding binding, bool async)
+        {
+            if (async)
+            {
+                return subject.ExecuteAsync(binding, CancellationToken.None).GetAwaiter().GetResult();
+            }
+            else
+            {
+                return subject.Execute(binding, CancellationToken.None);
+            }
+        }
+
+        private BsonDocument GetCollectionStats(IReadBinding binding, bool async)
         {
             var command = new BsonDocument
             {
@@ -453,7 +673,14 @@ namespace MongoDB.Driver.Core.Operations
             };
             var operation = new ReadCommandOperation<BsonDocument>(_collectionNamespace.DatabaseNamespace, command, BsonDocumentSerializer.Instance, _messageEncoderSettings);
 
-            return operation.ExecuteAsync(binding, CancellationToken.None);
+            if (async)
+            {
+                return operation.ExecuteAsync(binding, CancellationToken.None).GetAwaiter().GetResult();
+            }
+            else
+            {
+                return operation.Execute(binding, CancellationToken.None);
+            }
         }
     }
 }

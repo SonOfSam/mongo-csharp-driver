@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -41,8 +41,8 @@ namespace MongoDB.Driver.Core.Bindings
         /// <param name="channel">The channel.</param>
         public ChannelReadWriteBinding(IServer server, IChannelHandle channel)
         {
-            _server = Ensure.IsNotNull(server, "server");
-            _channel = Ensure.IsNotNull(channel, "channel");
+            _server = Ensure.IsNotNull(server, nameof(server));
+            _channel = Ensure.IsNotNull(channel, nameof(channel));
         }
 
         // properties
@@ -64,22 +64,38 @@ namespace MongoDB.Driver.Core.Bindings
             }
         }
 
-        private Task<IChannelSourceHandle> GetChannelSourceAsync(CancellationToken cancellationToken)
+        /// <inheritdoc/>
+        public IChannelSourceHandle GetReadChannelSource(CancellationToken cancellationToken)
         {
             ThrowIfDisposed();
-            return Task.FromResult<IChannelSourceHandle>(new ChannelSourceHandle(new ChannelChannelSource(_server, _channel.Fork())));
+            return GetChannelSourceHelper();
         }
 
         /// <inheritdoc/>
         public Task<IChannelSourceHandle> GetReadChannelSourceAsync(CancellationToken cancellationToken)
         {
-            return GetChannelSourceAsync(cancellationToken);
+            ThrowIfDisposed();
+            return Task.FromResult(GetChannelSourceHelper());
+        }
+
+        /// <inheritdoc/>
+        public IChannelSourceHandle GetWriteChannelSource(CancellationToken cancellationToken)
+        {
+            ThrowIfDisposed();
+            return GetChannelSourceHelper();
         }
 
         /// <inheritdoc/>
         public Task<IChannelSourceHandle> GetWriteChannelSourceAsync(CancellationToken cancellationToken)
         {
-            return GetChannelSourceAsync(cancellationToken);
+            ThrowIfDisposed();
+            return Task.FromResult(GetChannelSourceHelper());
+        }
+
+        // private methods
+        private IChannelSourceHandle GetChannelSourceHelper()
+        {
+            return new ChannelSourceHandle(new ChannelChannelSource(_server, _channel.Fork()));
         }
 
         private void ThrowIfDisposed()

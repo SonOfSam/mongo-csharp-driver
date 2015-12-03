@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -57,10 +57,10 @@ namespace MongoDB.Driver.Core.Operations
         /// <param name="messageEncoderSettings">The message encoder settings.</param>
         public GroupOperation(CollectionNamespace collectionNamespace, BsonDocument key, BsonDocument initial, BsonJavaScript reduceFunction, BsonDocument filter, MessageEncoderSettings messageEncoderSettings)
         {
-            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, "collectionNamespace");
-            _key = Ensure.IsNotNull(key, "key");
-            _initial = Ensure.IsNotNull(initial, "initial");
-            _reduceFunction = Ensure.IsNotNull(reduceFunction, "reduceFunction");
+            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, nameof(collectionNamespace));
+            _key = Ensure.IsNotNull(key, nameof(key));
+            _initial = Ensure.IsNotNull(initial, nameof(initial));
+            _reduceFunction = Ensure.IsNotNull(reduceFunction, nameof(reduceFunction));
             _filter = filter;
             _messageEncoderSettings = messageEncoderSettings;
         }
@@ -76,10 +76,10 @@ namespace MongoDB.Driver.Core.Operations
         /// <param name="messageEncoderSettings">The message encoder settings.</param>
         public GroupOperation(CollectionNamespace collectionNamespace, BsonJavaScript keyFunction, BsonDocument initial, BsonJavaScript reduceFunction, BsonDocument filter, MessageEncoderSettings messageEncoderSettings)
         {
-            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, "collectionNamespace");
-            _keyFunction = Ensure.IsNotNull(keyFunction, "keyFunction");
-            _initial = Ensure.IsNotNull(initial, "initial");
-            _reduceFunction = Ensure.IsNotNull(reduceFunction, "reduceFunction");
+            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, nameof(collectionNamespace));
+            _keyFunction = Ensure.IsNotNull(keyFunction, nameof(keyFunction));
+            _initial = Ensure.IsNotNull(initial, nameof(initial));
+            _reduceFunction = Ensure.IsNotNull(reduceFunction, nameof(reduceFunction));
             _filter = filter;
             _messageEncoderSettings = messageEncoderSettings;
         }
@@ -198,7 +198,24 @@ namespace MongoDB.Driver.Core.Operations
             set { _resultSerializer = value; }
         }
 
-        // methods
+        // public methods
+        /// <inheritdoc/>
+        public IEnumerable<TResult> Execute(IReadBinding binding, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNull(binding, nameof(binding));
+            var operation = CreateOperation();
+            return operation.Execute(binding, cancellationToken);
+        }
+
+        /// <inheritdoc/>
+        public async Task<IEnumerable<TResult>> ExecuteAsync(IReadBinding binding, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNull(binding, nameof(binding));
+            var operation = CreateOperation();
+            return await operation.ExecuteAsync(binding, cancellationToken).ConfigureAwait(false);
+        }
+
+        // private methods
         internal BsonDocument CreateCommand()
         {
             return new BsonDocument
@@ -218,16 +235,13 @@ namespace MongoDB.Driver.Core.Operations
            };
         }
 
-        /// <inheritdoc/>
-        public async Task<IEnumerable<TResult>> ExecuteAsync(IReadBinding binding, CancellationToken cancellationToken)
+        private ReadCommandOperation<TResult[]> CreateOperation()
         {
-            Ensure.IsNotNull(binding, "binding");
             var command = CreateCommand();
             var resultSerializer = _resultSerializer ?? BsonSerializer.LookupSerializer<TResult>();
             var resultArraySerializer = new ArraySerializer<TResult>(resultSerializer);
             var commandResultSerializer = new ElementDeserializer<TResult[]>("retval", resultArraySerializer);
-            var operation = new ReadCommandOperation<TResult[]>(_collectionNamespace.DatabaseNamespace, command, commandResultSerializer, _messageEncoderSettings);
-            return await operation.ExecuteAsync(binding, cancellationToken).ConfigureAwait(false);
+            return new ReadCommandOperation<TResult[]>(_collectionNamespace.DatabaseNamespace, command, commandResultSerializer, _messageEncoderSettings);
         }
     }
 }

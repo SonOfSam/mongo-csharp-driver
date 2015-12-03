@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -61,16 +61,6 @@ namespace MongoDB.Driver.Tests
             var sort = subject.Combine(
                 "{a: 1, b: -1}",
                 subject.Descending("a"));
-
-            Assert(sort, "{b: -1, a: -1}");
-        }
-
-        [Test]
-        public void Combine_with_repeated_fields_using_the_plus_operator()
-        {
-            var subject = CreateSubject<BsonDocument>();
-
-            var sort = subject.Ascending("a") + "{b: -1}" + new BsonDocument("a", -1);
 
             Assert(sort, "{b: -1, a: -1}");
         }

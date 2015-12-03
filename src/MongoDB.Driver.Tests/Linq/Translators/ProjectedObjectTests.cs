@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -13,14 +13,9 @@
 * limitations under the License.
 */
 
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using NUnit.Framework;
 using FluentAssertions;
 using MongoDB.Driver.Linq.Translators;
+using NUnit.Framework;
 
 namespace MongoDB.Driver.Tests.Linq.Translators
 {

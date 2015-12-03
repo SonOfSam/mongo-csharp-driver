@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -52,9 +52,16 @@ namespace MongoDB.Driver.Tests.Specifications.crud
             return (BsonDocument)expectedResult;
         }
 
-        protected override Task<BsonDocument> ExecuteAndGetResultAsync(IMongoCollection<BsonDocument> collection)
+        protected override BsonDocument ExecuteAndGetResult(IMongoCollection<BsonDocument> collection, bool async)
         {
-            return collection.FindOneAndDeleteAsync(_filter, _options);
+            if (async)
+            {
+                return collection.FindOneAndDeleteAsync(_filter, _options).GetAwaiter().GetResult();
+            }
+            else
+            {
+                return collection.FindOneAndDelete(_filter, _options);
+            }
         }
 
         protected override void VerifyResult(BsonDocument actualResult, BsonDocument expectedResult)

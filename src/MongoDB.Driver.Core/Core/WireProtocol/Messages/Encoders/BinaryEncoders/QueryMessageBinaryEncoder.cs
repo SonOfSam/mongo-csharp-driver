@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -47,6 +47,10 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages.Encoders.BinaryEncoders
             {
                 flags |= QueryFlags.NoCursorTimeout;
             }
+            if (message.OplogReplay)
+            {
+                flags |= QueryFlags.OplogReplay;
+            }
             if (message.PartialOk)
             {
                 flags |= QueryFlags.Partial;
@@ -72,6 +76,12 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages.Encoders.BinaryEncoders
         /// <returns>A message.</returns>
         public QueryMessage ReadMessage()
         {
+            return ReadMessage<BsonDocument>(BsonDocumentSerializer.Instance);
+        }
+
+        internal QueryMessage ReadMessage<TDocument>(IBsonSerializer<TDocument> serializer)
+            where TDocument : BsonDocument
+        {
             var binaryReader = CreateBinaryReader();
             var stream = binaryReader.BsonStream;
             var startPosition = stream.Position;
@@ -85,17 +95,18 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages.Encoders.BinaryEncoders
             var skip = stream.ReadInt32();
             var batchSize = stream.ReadInt32();
             var context = BsonDeserializationContext.CreateRoot(binaryReader);
-            var query = BsonDocumentSerializer.Instance.Deserialize(context);
+            var query = serializer.Deserialize(context);
             BsonDocument fields = null;
             if (stream.Position < startPosition + messageSize)
             {
-                fields = BsonDocumentSerializer.Instance.Deserialize(context);
+                fields = serializer.Deserialize(context);
             }
 
             var awaitData = (flags & QueryFlags.AwaitData) == QueryFlags.AwaitData;
             var slaveOk = (flags & QueryFlags.SlaveOk) == QueryFlags.SlaveOk;
             var partialOk = (flags & QueryFlags.Partial) == QueryFlags.Partial;
             var noCursorTimeout = (flags & QueryFlags.NoCursorTimeout) == QueryFlags.NoCursorTimeout;
+            var oplogReplay = (flags & QueryFlags.OplogReplay) == QueryFlags.OplogReplay;
             var tailableCursor = (flags & QueryFlags.TailableCursor) == QueryFlags.TailableCursor;
 
             return new QueryMessage(
@@ -109,6 +120,7 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages.Encoders.BinaryEncoders
                 slaveOk,
                 partialOk,
                 noCursorTimeout,
+                oplogReplay,
                 tailableCursor,
                 awaitData);
         }
@@ -119,7 +131,7 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages.Encoders.BinaryEncoders
         /// <param name="message">The message.</param>
         public void WriteMessage(QueryMessage message)
         {
-            Ensure.IsNotNull(message, "message");
+            Ensure.IsNotNull(message, nameof(message));
 
             var binaryWriter = CreateBinaryWriter();
             var stream = binaryWriter.BsonStream;
@@ -179,6 +191,7 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages.Encoders.BinaryEncoders
             None = 0,
             TailableCursor = 2,
             SlaveOk = 4,
+            OplogReplay = 8,
             NoCursorTimeout = 16,
             AwaitData = 32,
             Exhaust = 64,

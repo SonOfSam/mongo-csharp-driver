@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -60,6 +60,14 @@ namespace MongoDB.Driver.Tests.Builders
         {
             var options = IndexOptions.SetName("custom");
             string expected = "{ \"name\" : \"custom\" }";
+            Assert.AreEqual(expected, options.ToJson());
+        }
+
+        [Test]
+        public void TestPartialFilterExpression()
+        {
+            var options = IndexOptions.SetPartialFilterExpression(Query.GT("x", 0));
+            string expected = "{ \"partialFilterExpression\" : { \"x\" : { \"$gt\" : 0 } } }";
             Assert.AreEqual(expected, options.ToJson());
         }
 

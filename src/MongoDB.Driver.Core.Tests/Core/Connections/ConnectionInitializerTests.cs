@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+﻿/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -49,21 +49,33 @@ namespace MongoDB.Driver.Core.Connections
         }
 
         [Test]
-        public void InitializeConnectionAsync_should_throw_an_ArgumentNullException_if_the_connection_is_null()
+        public void InitializeConnection_should_throw_an_ArgumentNullException_if_the_connection_is_null(
+            [Values(false, true)]
+            bool async)
         {
-            Action act = () => _subject.InitializeConnectionAsync(null, CancellationToken.None).Wait();
+            Action act;
+            if (async)
+            {
+                act = () => _subject.InitializeConnectionAsync(null, CancellationToken.None).GetAwaiter().GetResult();
+            }
+            else
+            {
+                act = () => _subject.InitializeConnection(null, CancellationToken.None);
+            }
 
             act.ShouldThrow<ArgumentNullException>();
         }
 
         [Test]
-        public void InitializeConnectionAsync_should_build_the_ConnectionDescription_correctly()
+        public void InitializeConnectionA_should_build_the_ConnectionDescription_correctly(
+            [Values(false, true)]
+            bool async)
         {
-            var isMasterReply = MessageHelper.BuildSuccessReply<RawBsonDocument>(
+            var isMasterReply = MessageHelper.BuildReply<RawBsonDocument>(
                 RawBsonDocumentHelper.FromJson("{ ok: 1 }"));
-            var buildInfoReply = MessageHelper.BuildSuccessReply<RawBsonDocument>(
+            var buildInfoReply = MessageHelper.BuildReply<RawBsonDocument>(
                 RawBsonDocumentHelper.FromJson("{ ok: 1, version: \"2.6.3\" }"));
-            var gleReply = MessageHelper.BuildSuccessReply<RawBsonDocument>(
+            var gleReply = MessageHelper.BuildReply<RawBsonDocument>(
                 RawBsonDocumentHelper.FromJson("{ ok: 1, connectionId: 10 }"));
 
             var connection = new MockConnection(__serverId);
@@ -71,7 +83,15 @@ namespace MongoDB.Driver.Core.Connections
             connection.EnqueueReplyMessage(buildInfoReply);
             connection.EnqueueReplyMessage(gleReply);
 
-            var result = _subject.InitializeConnectionAsync(connection, CancellationToken.None).Result;
+            ConnectionDescription result;
+            if (async)
+            {
+                result = _subject.InitializeConnectionAsync(connection, CancellationToken.None).GetAwaiter().GetResult();
+            }
+            else
+            {
+                result = _subject.InitializeConnection(connection, CancellationToken.None);
+            }
 
             result.ServerVersion.Should().Be(new SemanticVersion(2, 6, 3));
             result.ConnectionId.ServerValue.Should().Be(10);

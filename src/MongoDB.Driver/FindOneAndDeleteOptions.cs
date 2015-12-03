@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -26,12 +26,12 @@ namespace MongoDB.Driver
     /// Options for a findAndModify command to delete an object.
     /// </summary>
     /// <typeparam name="TDocument">The type of the document.</typeparam>
-    /// <typeparam name="TResult">The type of the result.</typeparam>
-    public class FindOneAndDeleteOptions<TDocument, TResult>
+    /// <typeparam name="TProjection">The type of the projection (same as TDocument if there is no projection).</typeparam>
+    public class FindOneAndDeleteOptions<TDocument, TProjection>
     {
         // fields
         private TimeSpan? _maxTime;
-        private ProjectionDefinition<TDocument, TResult> _projection;
+        private ProjectionDefinition<TDocument, TProjection> _projection;
         private SortDefinition<TDocument> _sort;
 
         // properties
@@ -47,7 +47,7 @@ namespace MongoDB.Driver
         /// <summary>
         /// Gets or sets the projection.
         /// </summary>
-        public ProjectionDefinition<TDocument, TResult> Projection
+        public ProjectionDefinition<TDocument, TProjection> Projection
         {
             get { return _projection; }
             set { _projection = value; }

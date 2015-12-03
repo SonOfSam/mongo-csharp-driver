@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ namespace MongoDB.Driver.Core.Operations
     internal class UpdateOpcodeOperationEmulator
     {
         // fields
+        private bool? _bypassDocumentValidation;
         private readonly CollectionNamespace _collectionNamespace;
         private int? _maxDocumentSize;
         private readonly MessageEncoderSettings _messageEncoderSettings;
@@ -38,12 +39,18 @@ namespace MongoDB.Driver.Core.Operations
             UpdateRequest request,
             MessageEncoderSettings messageEncoderSettings)
         {
-            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, "collectionNamespace");
-            _request = Ensure.IsNotNull(request, "request");
-            _messageEncoderSettings = Ensure.IsNotNull(messageEncoderSettings, "messageEncoderSettings");
+            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, nameof(collectionNamespace));
+            _request = Ensure.IsNotNull(request, nameof(request));
+            _messageEncoderSettings = Ensure.IsNotNull(messageEncoderSettings, nameof(messageEncoderSettings));
         }
 
         // properties
+        public bool? BypassDocumentValidation
+        {
+            get { return _bypassDocumentValidation; }
+            set { _bypassDocumentValidation = value; }
+        }
+
         public CollectionNamespace CollectionNamespace
         {
             get { return _collectionNamespace; }
@@ -58,7 +65,7 @@ namespace MongoDB.Driver.Core.Operations
         public int? MaxDocumentSize
         {
             get { return _maxDocumentSize; }
-            set { _maxDocumentSize = Ensure.IsNullOrGreaterThanZero(value, "value"); }
+            set { _maxDocumentSize = Ensure.IsNullOrGreaterThanZero(value, nameof(value)); }
         }
 
         public MessageEncoderSettings MessageEncoderSettings
@@ -74,44 +81,74 @@ namespace MongoDB.Driver.Core.Operations
         public WriteConcern WriteConcern
         {
             get { return _writeConcern; }
-            set { _writeConcern = Ensure.IsNotNull(value, "value"); }
+            set { _writeConcern = Ensure.IsNotNull(value, nameof(value)); }
         }
 
-        // methods
-        public async Task<WriteConcernResult> ExecuteAsync(IChannelHandle channel, CancellationToken cancellationToken)
+        // public methods
+        public WriteConcernResult Execute(IChannelHandle channel, CancellationToken cancellationToken)
         {
-            Ensure.IsNotNull(channel, "channel");
+            Ensure.IsNotNull(channel, nameof(channel));
 
-            var requests = new[] { _request };
-
-            var operation = new BulkUpdateOperation(_collectionNamespace, requests, _messageEncoderSettings)
-            {
-                IsOrdered = true,
-                WriteConcern = _writeConcern
-            };
-
-            BulkWriteOperationResult bulkWriteResult;
-            MongoBulkWriteOperationException bulkWriteException = null;
+            var operation = CreateOperation();
+            BulkWriteOperationResult result;
+            MongoBulkWriteOperationException exception = null;
             try
             {
-                bulkWriteResult = await operation.ExecuteAsync(channel, cancellationToken).ConfigureAwait(false);
+                result = operation.Execute(channel, cancellationToken);
             }
             catch (MongoBulkWriteOperationException ex)
             {
-                bulkWriteResult = ex.Result;
-                bulkWriteException = ex;
+                result = ex.Result;
+                exception = ex;
             }
 
-            var converter = new BulkWriteOperationResultConverter();
-            if (bulkWriteException != null)
+            return CreateResultOrThrow(channel, result, exception);
+        }
+
+        public async Task<WriteConcernResult> ExecuteAsync(IChannelHandle channel, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNull(channel, nameof(channel));
+
+            var operation = CreateOperation();
+            BulkWriteOperationResult result;
+            MongoBulkWriteOperationException exception = null;
+            try
             {
-                throw converter.ToWriteConcernException(channel.ConnectionDescription.ConnectionId, bulkWriteException);
+                result = await operation.ExecuteAsync(channel, cancellationToken).ConfigureAwait(false);
+            }
+            catch (MongoBulkWriteOperationException ex)
+            {
+                result = ex.Result;
+                exception = ex;
+            }
+
+            return CreateResultOrThrow(channel, result, exception);
+        }
+
+        // private methods
+        private BulkUpdateOperation CreateOperation()
+        {
+            var requests = new[] { _request };
+            return new BulkUpdateOperation(_collectionNamespace, requests, _messageEncoderSettings)
+            {
+                BypassDocumentValidation = _bypassDocumentValidation,
+                IsOrdered = true,
+                WriteConcern = _writeConcern
+            };
+        }
+
+        private WriteConcernResult CreateResultOrThrow(IChannelHandle channel, BulkWriteOperationResult result, MongoBulkWriteOperationException exception)
+        {
+            var converter = new BulkWriteOperationResultConverter();
+            if (exception != null)
+            {
+                throw converter.ToWriteConcernException(channel.ConnectionDescription.ConnectionId, exception);
             }
             else
             {
                 if (_writeConcern.IsAcknowledged)
                 {
-                    return converter.ToWriteConcernResult(bulkWriteResult);
+                    return converter.ToWriteConcernResult(result);
                 }
                 else
                 {

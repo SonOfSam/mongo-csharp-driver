@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -46,10 +46,12 @@ namespace MongoDB.Driver
         private readonly int _maxConnectionPoolSize;
         private readonly int _minConnectionPoolSize;
         private readonly string _password;
+        private readonly ReadConcernLevel? _readConcernLevel;
         private readonly ReadPreference _readPreference;
         private readonly string _replicaSetName;
         private readonly TimeSpan _localThreshold;
         private readonly IEnumerable<MongoServerAddress> _servers;
+        private readonly TimeSpan _serverSelectionTimeout;
         private readonly TimeSpan _socketTimeout;
         private readonly string _username;
         private readonly bool _useSsl;
@@ -85,9 +87,11 @@ namespace MongoDB.Driver
             _maxConnectionPoolSize = builder.MaxConnectionPoolSize;
             _minConnectionPoolSize = builder.MinConnectionPoolSize;
             _password = builder.Password;
+            _readConcernLevel = builder.ReadConcernLevel;
             _readPreference = builder.ReadPreference;
             _replicaSetName = builder.ReplicaSetName;
             _servers = builder.Servers;
+            _serverSelectionTimeout = builder.ServerSelectionTimeout;
             _socketTimeout = builder.SocketTimeout;
             _username = builder.Username;
             _useSsl = builder.UseSsl;
@@ -248,6 +252,14 @@ namespace MongoDB.Driver
         }
 
         /// <summary>
+        /// Gets the read concern level.
+        /// </summary>
+        public ReadConcernLevel? ReadConcernLevel
+        {
+            get { return _readConcernLevel; }
+        }
+
+        /// <summary>
         /// Gets the read preference.
         /// </summary>
         public ReadPreference ReadPreference
@@ -277,6 +289,14 @@ namespace MongoDB.Driver
         public IEnumerable<MongoServerAddress> Servers
         {
             get { return _servers; }
+        }
+
+        /// <summary>
+        /// Gets the server selection timeout.
+        /// </summary>
+        public TimeSpan ServerSelectionTimeout
+        {
+            get { return _serverSelectionTimeout; }
         }
 
         /// <summary>

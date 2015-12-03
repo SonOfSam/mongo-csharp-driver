@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -151,16 +151,6 @@ namespace MongoDB.Driver.Tests
         }
 
         [Test]
-        public void Combine_with_overlapping_operators_and_duplicate_elements_using_the_plus_operator()
-        {
-            var subject = CreateSubject<BsonDocument>();
-
-            var update = subject.Set("a", 1) + "{$set: { b: 2}}" + new BsonDocument("$set", new BsonDocument("a", 4));
-
-            Assert(update, "{$set: {a: 4, b: 2}}");
-        }
-
-        [Test]
         public void Combine_with_overlapping_operators_and_duplicate_elements_using_extension_methods()
         {
             var subject = CreateSubject<BsonDocument>();
@@ -246,6 +236,11 @@ namespace MongoDB.Driver.Tests
             Assert(subject.Set(x => x.FavoriteColors[2], "yellow"), "{$set: {'colors.2': 'yellow'}}");
             Assert(subject.Set(x => x.Pets[2].Name, "Fluffencutters"), "{$set: {'pets.2.name': 'Fluffencutters'}}");
             Assert(subject.Set(x => x.Pets.ElementAt(2).Name, "Fluffencutters"), "{$set: {'pets.2.name': 'Fluffencutters'}}");
+
+            var index = 2;
+            Assert(subject.Set(x => x.FavoriteColors[index], "yellow"), "{$set: {'colors.2': 'yellow'}}");
+            Assert(subject.Set(x => x.Pets[index].Name, "Fluffencutters"), "{$set: {'pets.2.name': 'Fluffencutters'}}");
+            Assert(subject.Set(x => x.Pets.ElementAt(index).Name, "Fluffencutters"), "{$set: {'pets.2.name': 'Fluffencutters'}}");
         }
 
         [Test]

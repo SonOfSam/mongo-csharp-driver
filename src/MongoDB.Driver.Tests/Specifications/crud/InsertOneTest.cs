@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -34,9 +34,16 @@ namespace MongoDB.Driver.Tests.Specifications.crud
             return false;
         }
 
-        protected override Task ExecuteAsync(IMongoCollection<BsonDocument> collection, BsonDocument outcome)
+        protected override void Execute(IMongoCollection<BsonDocument> collection, BsonDocument outcome, bool async)
         {
-            return collection.InsertOneAsync(_document);
+            if (async)
+            {
+                collection.InsertOneAsync(_document).GetAwaiter().GetResult();
+            }
+            else
+            {
+                collection.InsertOne(_document);
+            }
         }
     }
 }

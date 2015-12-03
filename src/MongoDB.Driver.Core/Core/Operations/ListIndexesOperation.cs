@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -13,14 +13,11 @@
 * limitations under the License.
 */
 
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using MongoDB.Bson;
-using MongoDB.Bson.Serialization.Serializers;
 using MongoDB.Driver.Core.Bindings;
+using MongoDB.Driver.Core.Events;
 using MongoDB.Driver.Core.Misc;
 using MongoDB.Driver.Core.WireProtocol.Messages.Encoders;
 
@@ -31,11 +28,6 @@ namespace MongoDB.Driver.Core.Operations
     /// </summary>
     public class ListIndexesOperation : IReadOperation<IAsyncCursor<BsonDocument>>
     {
-        #region static
-        // static fields
-        private static readonly SemanticVersion __serverVersionSupportingListIndexesCommand = new SemanticVersion(2, 7, 6);
-        #endregion
-
         // fields
         private readonly CollectionNamespace _collectionNamespace;
         private readonly MessageEncoderSettings _messageEncoderSettings;
@@ -50,7 +42,7 @@ namespace MongoDB.Driver.Core.Operations
             CollectionNamespace collectionNamespace,
             MessageEncoderSettings messageEncoderSettings)
         {
-            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, "collectionNamespace");
+            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, nameof(collectionNamespace));
             _messageEncoderSettings = messageEncoderSettings;
         }
 
@@ -77,68 +69,48 @@ namespace MongoDB.Driver.Core.Operations
             get { return _messageEncoderSettings; }
         }
 
-        // methods
+        // public methods
+        /// <inheritdoc/>
+        public IAsyncCursor<BsonDocument> Execute(IReadBinding binding, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNull(binding, nameof(binding));
+
+            using (EventContext.BeginOperation())
+            using (var channelSource = binding.GetReadChannelSource(cancellationToken))
+            using (var channel = channelSource.GetChannel(cancellationToken))
+            using (var channelBinding = new ChannelReadBinding(channelSource.Server, channel, binding.ReadPreference))
+            {
+                var operation = CreateOperation(channel);
+                return operation.Execute(channelBinding, cancellationToken);
+            }
+        }
+
         /// <inheritdoc/>
         public async Task<IAsyncCursor<BsonDocument>> ExecuteAsync(IReadBinding binding, CancellationToken cancellationToken)
         {
-            Ensure.IsNotNull(binding, "binding");
+            Ensure.IsNotNull(binding, nameof(binding));
 
+            using (EventContext.BeginOperation())
             using (var channelSource = await binding.GetReadChannelSourceAsync(cancellationToken).ConfigureAwait(false))
+            using (var channel = await channelSource.GetChannelAsync(cancellationToken).ConfigureAwait(false))
+            using (var channelBinding = new ChannelReadBinding(channelSource.Server, channel, binding.ReadPreference))
             {
-                if (channelSource.ServerDescription.Version >= __serverVersionSupportingListIndexesCommand)
-                {
-                    return await ExecuteUsingCommandAsync(channelSource, binding.ReadPreference, cancellationToken).ConfigureAwait(false);
-                }
-                else
-                {
-                    return await ExecuteUsingQueryAsync(channelSource, binding.ReadPreference, cancellationToken).ConfigureAwait(false);
-                }
+                var operation = CreateOperation(channel);
+                return await operation.ExecuteAsync(channelBinding, cancellationToken).ConfigureAwait(false);
             }
         }
 
-        private async Task<IAsyncCursor<BsonDocument>> ExecuteUsingCommandAsync(IChannelSourceHandle channelSource, ReadPreference readPreference, CancellationToken cancellationToken)
+        // private methods
+        private IReadOperation<IAsyncCursor<BsonDocument>> CreateOperation(IChannel channel)
         {
-            var databaseNamespace = _collectionNamespace.DatabaseNamespace;
-            var command = new BsonDocument("listIndexes", _collectionNamespace.CollectionName);
-            var operation = new ReadCommandOperation<BsonDocument>(databaseNamespace, command, BsonDocumentSerializer.Instance, _messageEncoderSettings);
-
-            try
+            if (SupportedFeatures.IsListIndexesCommandSupported(channel.ConnectionDescription.ServerVersion))
             {
-                var response = await operation.ExecuteAsync(channelSource, readPreference, cancellationToken).ConfigureAwait(false);
-                var cursorDocument = response["cursor"].AsBsonDocument;
-                var cursor = new AsyncCursor<BsonDocument>(
-                    channelSource.Fork(),
-                    CollectionNamespace.FromFullName(cursorDocument["ns"].AsString),
-                    command,
-                    cursorDocument["firstBatch"].AsBsonArray.OfType<BsonDocument>().ToList(),
-                    cursorDocument["id"].ToInt64(),
-                    0,
-                    0,
-                    BsonDocumentSerializer.Instance,
-                    _messageEncoderSettings);
-
-                return cursor;
+                return new ListIndexesUsingCommandOperation(_collectionNamespace, _messageEncoderSettings);
             }
-            catch (MongoCommandException ex)
+            else
             {
-                if (ex.Code == 26)
-                {
-                    return new SingleBatchAsyncCursor<BsonDocument>(new List<BsonDocument>());
-                }
-                throw;
+                return new ListIndexesUsingQueryOperation(_collectionNamespace, _messageEncoderSettings);
             }
-        }
-
-        private async Task<IAsyncCursor<BsonDocument>> ExecuteUsingQueryAsync(IChannelSourceHandle channelSource, ReadPreference readPreference, CancellationToken cancellationToken)
-        {
-            var systemIndexesCollection = _collectionNamespace.DatabaseNamespace.SystemIndexesCollection;
-            var filter = new BsonDocument("ns", _collectionNamespace.FullName);
-            var operation = new FindOperation<BsonDocument>(systemIndexesCollection, BsonDocumentSerializer.Instance, _messageEncoderSettings)
-            {
-                Filter = filter
-            };
-
-            return await operation.ExecuteAsync(channelSource, readPreference, cancellationToken).ConfigureAwait(false);
         }
     }
 }

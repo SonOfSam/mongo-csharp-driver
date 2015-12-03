@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -55,11 +55,11 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages
             bool continueOnError)
             : base(requestId)
         {
-            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, "collectionNamespace");
-            _serializer = Ensure.IsNotNull(serializer, "serializer");
-            _documentSource = Ensure.IsNotNull(documentSource, "documentSource");
-            _maxBatchCount = Ensure.IsGreaterThanZero(maxBatchCount, "maxBatchCount");
-            _maxMessageSize = Ensure.IsGreaterThanZero(maxMessageSize, "maxMessageSize");
+            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, nameof(collectionNamespace));
+            _serializer = Ensure.IsNotNull(serializer, nameof(serializer));
+            _documentSource = Ensure.IsNotNull(documentSource, nameof(documentSource));
+            _maxBatchCount = Ensure.IsGreaterThanZero(maxBatchCount, nameof(maxBatchCount));
+            _maxMessageSize = Ensure.IsGreaterThanZero(maxMessageSize, nameof(maxMessageSize));
             _continueOnError = continueOnError;
         }
 
@@ -67,9 +67,6 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages
         /// <summary>
         /// Gets the collection namespace.
         /// </summary>
-        /// <value>
-        /// The collection namespace.
-        /// </value>
         public CollectionNamespace CollectionNamespace
         {
             get { return _collectionNamespace; }
@@ -78,9 +75,6 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages
         /// <summary>
         /// Gets a value indicating whether the server should continue on error.
         /// </summary>
-        /// <value>
-        ///   <c>true</c> if the server should continue on error; otherwise, <c>false</c>.
-        /// </value>
         public bool ContinueOnError
         {
             get { return _continueOnError; }
@@ -89,9 +83,6 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages
         /// <summary>
         /// Gets the document source.
         /// </summary>
-        /// <value>
-        /// The document source.
-        /// </value>
         public BatchableSource<TDocument> DocumentSource
         {
             get { return _documentSource; }
@@ -100,9 +91,6 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages
         /// <summary>
         /// Gets the maximum number of documents in a batch.
         /// </summary>
-        /// <value>
-        /// The maximum number of documents in a batch.
-        /// </value>
         public int MaxBatchCount
         {
             get { return _maxBatchCount; }
@@ -111,20 +99,20 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages
         /// <summary>
         /// Gets the maximum size of a message.
         /// </summary>
-        /// <value>
-        /// The maximum size of a message.
-        /// </value>
         public int MaxMessageSize
         {
             get { return _maxMessageSize; }
         }
 
+        /// <inheritdoc/>
+        public override MongoDBMessageType MessageType
+        {
+            get { return MongoDBMessageType.Insert; }
+        }
+
         /// <summary>
         /// Gets the serializer.
         /// </summary>
-        /// <value>
-        /// The serializer.
-        /// </value>
         public IBsonSerializer<TDocument> Serializer
         {
             get { return _serializer; }

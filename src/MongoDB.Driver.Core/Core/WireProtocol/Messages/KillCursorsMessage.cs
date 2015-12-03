@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -44,19 +44,22 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages
             IEnumerable<long> cursorIds)
             : base(requestId)
         {
-            _cursorIds = Ensure.IsNotNull(cursorIds, "cursorIds").ToList();
+            _cursorIds = Ensure.IsNotNull(cursorIds, nameof(cursorIds)).ToList();
         }
 
         // properties
         /// <summary>
         /// Gets the cursor ids.
         /// </summary>
-        /// <value>
-        /// The cursor ids.
-        /// </value>
         public IReadOnlyList<long> CursorIds
         {
             get { return _cursorIds; }
+        }
+
+        /// <inheritdoc/>
+        public override MongoDBMessageType MessageType
+        {
+            get { return MongoDBMessageType.KillCursors; }
         }
 
         // methods

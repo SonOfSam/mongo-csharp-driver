@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -50,8 +50,8 @@ namespace MongoDB.Driver.Core.Operations
             BsonJavaScript function,
             MessageEncoderSettings messageEncoderSettings)
         {
-            _databaseNamespace = Ensure.IsNotNull(databaseNamespace, "databaseNamespace");
-            _function = Ensure.IsNotNull(function, "function");
+            _databaseNamespace = Ensure.IsNotNull(databaseNamespace, nameof(databaseNamespace));
+            _function = Ensure.IsNotNull(function, nameof(function));
             _messageEncoderSettings = messageEncoderSettings;
         }
 
@@ -99,7 +99,7 @@ namespace MongoDB.Driver.Core.Operations
         public TimeSpan? MaxTime
         {
             get { return _maxTime; }
-            set { _maxTime = Ensure.IsNullOrInfiniteOrGreaterThanOrEqualToZero(value, "value"); }
+            set { _maxTime = Ensure.IsNullOrInfiniteOrGreaterThanOrEqualToZero(value, nameof(value)); }
         }
 
         /// <summary>
@@ -125,7 +125,26 @@ namespace MongoDB.Driver.Core.Operations
             set { _noLock = value; }
         }
 
-        // methods
+        // public methods
+        /// <inheritdoc/>
+        public BsonValue Execute(IWriteBinding binding, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNull(binding, nameof(binding));
+            var operation = CreateOperation();
+            var result = operation.Execute(binding, cancellationToken);
+            return result["retval"];
+        }
+
+        /// <inheritdoc/>
+        public async Task<BsonValue> ExecuteAsync(IWriteBinding binding, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNull(binding, nameof(binding));
+            var operation = CreateOperation();
+            var result = await operation.ExecuteAsync(binding, cancellationToken).ConfigureAwait(false);
+            return result["retval"];
+        }
+
+        // private methods
         internal BsonDocument CreateCommand()
         {
             return new BsonDocument
@@ -137,14 +156,10 @@ namespace MongoDB.Driver.Core.Operations
             };
         }
 
-        /// <inheritdoc/>
-        public async Task<BsonValue> ExecuteAsync(IWriteBinding binding, CancellationToken cancellationToken)
+        private WriteCommandOperation<BsonDocument> CreateOperation()
         {
-            Ensure.IsNotNull(binding, "binding");
             var command = CreateCommand();
-            var operation = new WriteCommandOperation<BsonDocument>(_databaseNamespace, command, BsonDocumentSerializer.Instance, _messageEncoderSettings);
-            var result = await operation.ExecuteAsync(binding, cancellationToken).ConfigureAwait(false);
-            return result["retval"];
+            return new WriteCommandOperation<BsonDocument>(_databaseNamespace, command, BsonDocumentSerializer.Instance, _messageEncoderSettings);
         }
     }
 }

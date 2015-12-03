@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -56,9 +56,9 @@ namespace MongoDB.Driver.Core.Operations
             IBsonSerializer<TCommandResult> resultSerializer,
             MessageEncoderSettings messageEncoderSettings)
         {
-            _databaseNamespace = Ensure.IsNotNull(databaseNamespace, "databaseNamespace");
-            _command = Ensure.IsNotNull(command, "command");
-            _resultSerializer = Ensure.IsNotNull(resultSerializer, "resultSerializer");
+            _databaseNamespace = Ensure.IsNotNull(databaseNamespace, nameof(databaseNamespace));
+            _command = Ensure.IsNotNull(command, nameof(command));
+            _resultSerializer = Ensure.IsNotNull(resultSerializer, nameof(resultSerializer));
             _messageEncoderSettings = messageEncoderSettings;
         }
 
@@ -95,7 +95,7 @@ namespace MongoDB.Driver.Core.Operations
         public IElementNameValidator CommandValidator
         {
             get { return _commandValidator; }
-            set { _commandValidator = Ensure.IsNotNull(value, "value"); }
+            set { _commandValidator = Ensure.IsNotNull(value, nameof(value)); }
         }
 
         /// <summary>
@@ -173,6 +173,40 @@ namespace MongoDB.Driver.Core.Operations
             }
         }
 
+        private TCommandResult ExecuteProtocol(IChannelHandle channel, ServerDescription serverDescription, ReadPreference readPreference, CancellationToken cancellationToken)
+        {
+            var wrappedCommand = CreateWrappedCommand(serverDescription, readPreference);
+            var slaveOk = readPreference != null && readPreference.ReadPreferenceMode != ReadPreferenceMode.Primary;
+
+            return channel.Command<TCommandResult>(
+                _databaseNamespace,
+                wrappedCommand,
+                _commandValidator,
+                () => CommandResponseHandling.Return,
+                slaveOk,
+                _resultSerializer,
+                _messageEncoderSettings,
+                cancellationToken);
+        }
+
+        /// <summary>
+        /// Executes the protocol.
+        /// </summary>
+        /// <param name="channelSource">The channel source.</param>
+        /// <param name="readPreference">The read preference.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>A Task whose result is the command result.</returns>
+        protected TCommandResult ExecuteProtocol(
+            IChannelSource channelSource,
+            ReadPreference readPreference,
+            CancellationToken cancellationToken)
+        {
+            using (var channel = channelSource.GetChannel(cancellationToken))
+            {
+                return ExecuteProtocol(channel, channelSource.ServerDescription, readPreference, cancellationToken);
+            }
+        }
+
         private Task<TCommandResult> ExecuteProtocolAsync(IChannelHandle channel, ServerDescription serverDescription, ReadPreference readPreference, CancellationToken cancellationToken)
         {
             var wrappedCommand = CreateWrappedCommand(serverDescription, readPreference);
@@ -182,6 +216,7 @@ namespace MongoDB.Driver.Core.Operations
                 _databaseNamespace,
                 wrappedCommand,
                 _commandValidator,
+                () => CommandResponseHandling.Return,
                 slaveOk,
                 _resultSerializer,
                 _messageEncoderSettings,

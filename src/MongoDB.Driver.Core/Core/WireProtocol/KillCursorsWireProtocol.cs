@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ namespace MongoDB.Driver.Core.WireProtocol
         // constructors
         public KillCursorsWireProtocol(IEnumerable<long> cursorIds, MessageEncoderSettings messageEncoderSettings)
         {
-            Ensure.IsNotNull(cursorIds, "cursorIds");
+            Ensure.IsNotNull(cursorIds, nameof(cursorIds));
             _cursorIds = (cursorIds as IReadOnlyList<long>) ?? cursorIds.ToList();
             _messageEncoderSettings = messageEncoderSettings;
         }
@@ -43,6 +43,12 @@ namespace MongoDB.Driver.Core.WireProtocol
         private KillCursorsMessage CreateMessage()
         {
             return new KillCursorsMessage(RequestMessage.GetNextRequestId(), _cursorIds);
+        }
+
+        public void Execute(IConnection connection, CancellationToken cancellationToken)
+        {
+            var message = CreateMessage();
+            connection.SendMessage(message, _messageEncoderSettings, cancellationToken);
         }
 
         public async Task ExecuteAsync(IConnection connection, CancellationToken cancellationToken)

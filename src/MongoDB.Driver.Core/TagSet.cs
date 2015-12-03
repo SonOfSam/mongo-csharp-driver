@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -46,7 +46,7 @@ namespace MongoDB.Driver
         /// <param name="tags">The tags.</param>
         public TagSet(IEnumerable<Tag> tags)
         {
-            _tags = Ensure.IsNotNull(tags, "tags").ToList();
+            _tags = Ensure.IsNotNull(tags, nameof(tags)).ToList();
         }
 
         // properties

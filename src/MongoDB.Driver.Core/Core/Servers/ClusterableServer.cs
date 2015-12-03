@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -25,7 +25,6 @@ using MongoDB.Bson;
 using MongoDB.Bson.IO;
 using MongoDB.Bson.Serialization;
 using MongoDB.Bson.Serialization.Serializers;
-using MongoDB.Driver.Core.Async;
 using MongoDB.Driver.Core.Bindings;
 using MongoDB.Driver.Core.Clusters;
 using MongoDB.Driver.Core.Configuration;
@@ -34,7 +33,6 @@ using MongoDB.Driver.Core.Connections;
 using MongoDB.Driver.Core.Events;
 using MongoDB.Driver.Core.Misc;
 using MongoDB.Driver.Core.WireProtocol;
-using MongoDB.Driver.Core.WireProtocol.Messages;
 using MongoDB.Driver.Core.WireProtocol.Messages.Encoders;
 
 namespace MongoDB.Driver.Core.Servers
@@ -46,7 +44,7 @@ namespace MongoDB.Driver.Core.Servers
     {
         #region static
         // static fields
-        private static readonly TimeSpan __minHeartbeatInterval = TimeSpan.FromMilliseconds(10);
+        private static readonly TimeSpan __minHeartbeatInterval = TimeSpan.FromMilliseconds(500);
         private static readonly List<Type> __invalidatingExceptions = new List<Type>
         {
             typeof(MongoNotPrimaryException),
@@ -68,29 +66,46 @@ namespace MongoDB.Driver.Core.Servers
         private readonly IConnectionFactory _heartbeatConnectionFactory;
         private IConnection _heartbeatConnection;
         private HeartbeatDelay _heartbeatDelay;
-        private readonly IServerListener _listener;
         private readonly ServerId _serverId;
         private readonly ServerSettings _settings;
         private readonly InterlockedInt32 _state;
+
+        private readonly Action<ServerOpeningEvent> _openingEventHandler;
+        private readonly Action<ServerOpenedEvent> _openedEventHandler;
+        private readonly Action<ServerClosingEvent> _closingEventHandler;
+        private readonly Action<ServerClosedEvent> _closedEventHandler;
+        private readonly Action<ServerHeartbeatStartedEvent> _heartbeatStartedEventHandler;
+        private readonly Action<ServerHeartbeatSucceededEvent> _heartbeatSucceededEventHandler;
+        private readonly Action<ServerHeartbeatFailedEvent> _heartbeatFailedEventHandler;
+        private readonly Action<ServerDescriptionChangedEvent> _descriptionChangedEventHandler;
 
         // events
         public event EventHandler<ServerDescriptionChangedEventArgs> DescriptionChanged;
 
         // constructors
-        public ClusterableServer(ClusterId clusterId, ClusterConnectionMode clusterConnectionMode, ServerSettings settings, EndPoint endPoint, IConnectionPoolFactory connectionPoolFactory, IConnectionFactory heartbeatConnectionFactory, IServerListener listener)
+        public ClusterableServer(ClusterId clusterId, ClusterConnectionMode clusterConnectionMode, ServerSettings settings, EndPoint endPoint, IConnectionPoolFactory connectionPoolFactory, IConnectionFactory heartbeatConnectionFactory, IEventSubscriber eventSubscriber)
         {
-            Ensure.IsNotNull(clusterId, "clusterId");
+            Ensure.IsNotNull(clusterId, nameof(clusterId));
             _clusterConnectionMode = clusterConnectionMode;
-            _settings = Ensure.IsNotNull(settings, "settings"); ;
-            _endPoint = Ensure.IsNotNull(endPoint, "endPoint");
-            Ensure.IsNotNull(connectionPoolFactory, "connectionPoolFactory");
-            _heartbeatConnectionFactory = Ensure.IsNotNull(heartbeatConnectionFactory, "heartbeatConnectionFactory");
-            _listener = listener;
+            _settings = Ensure.IsNotNull(settings, nameof(settings)); ;
+            _endPoint = Ensure.IsNotNull(endPoint, nameof(endPoint));
+            Ensure.IsNotNull(connectionPoolFactory, nameof(connectionPoolFactory));
+            _heartbeatConnectionFactory = Ensure.IsNotNull(heartbeatConnectionFactory, nameof(heartbeatConnectionFactory));
+            Ensure.IsNotNull(eventSubscriber, nameof(eventSubscriber));
 
             _serverId = new ServerId(clusterId, endPoint);
             _baseDescription = _currentDescription = new ServerDescription(_serverId, endPoint);
             _connectionPool = connectionPoolFactory.CreateConnectionPool(_serverId, endPoint);
             _state = new InterlockedInt32(State.Initial);
+
+            eventSubscriber.TryGetEventHandler(out _openingEventHandler);
+            eventSubscriber.TryGetEventHandler(out _openedEventHandler);
+            eventSubscriber.TryGetEventHandler(out _closingEventHandler);
+            eventSubscriber.TryGetEventHandler(out _closedEventHandler);
+            eventSubscriber.TryGetEventHandler(out _heartbeatStartedEventHandler);
+            eventSubscriber.TryGetEventHandler(out _heartbeatSucceededEventHandler);
+            eventSubscriber.TryGetEventHandler(out _heartbeatFailedEventHandler);
+            eventSubscriber.TryGetEventHandler(out _descriptionChangedEventHandler);
         }
 
         // properties
@@ -122,19 +137,19 @@ namespace MongoDB.Driver.Core.Servers
         {
             if (_state.TryChange(State.Initial, State.Open))
             {
-                if (_listener != null)
+                if (_openingEventHandler != null)
                 {
-                    _listener.ServerBeforeOpening(new ServerBeforeOpeningEvent(_serverId, _settings));
+                    _openingEventHandler(new ServerOpeningEvent(_serverId, _settings));
                 }
 
                 var stopwatch = Stopwatch.StartNew();
                 _connectionPool.Initialize();
-                MonitorServer().ConfigureAwait(false);
+                MonitorServerAsync().ConfigureAwait(false);
                 stopwatch.Stop();
 
-                if (_listener != null)
+                if (_openedEventHandler != null)
                 {
-                    _listener.ServerAfterOpening(new ServerAfterOpeningEvent(_serverId, _settings, stopwatch.Elapsed));
+                    _openedEventHandler(new ServerOpenedEvent(_serverId, _settings, stopwatch.Elapsed));
                 }
             }
         }
@@ -159,9 +174,9 @@ namespace MongoDB.Driver.Core.Servers
             {
                 if (disposing)
                 {
-                    if (_listener != null)
+                    if (_closingEventHandler != null)
                     {
-                        _listener.ServerBeforeClosing(new ServerBeforeClosingEvent(_serverId));
+                        _closingEventHandler(new ServerClosingEvent(_serverId));
                     }
 
                     var stopwatch = Stopwatch.StartNew();
@@ -172,13 +187,35 @@ namespace MongoDB.Driver.Core.Servers
                     {
                         _heartbeatConnection.Dispose();
                     }
-
                     stopwatch.Stop();
-                    if (_listener != null)
+
+                    if (_closedEventHandler != null)
                     {
-                        _listener.ServerAfterClosing(new ServerAfterClosingEvent(_serverId, stopwatch.Elapsed));
+                        _closedEventHandler(new ServerClosedEvent(_serverId, stopwatch.Elapsed));
                     }
                 }
+            }
+        }
+
+        public IChannelHandle GetChannel(CancellationToken cancellationToken)
+        {
+            ThrowIfNotOpen();
+
+            var connection = _connectionPool.AcquireConnection(cancellationToken);
+            try
+            {
+                // ignoring the user's cancellation token here because we don't
+                // want to throw this connection away simply because the user
+                // wanted to cancel their operation. It will be better for the
+                // collective to complete opening the connection than the throw
+                // it away.
+                connection.Open(CancellationToken.None);
+                return new ServerChannel(this, connection);
+            }
+            catch
+            {
+                connection.Dispose();
+                throw;
             }
         }
 
@@ -204,7 +241,7 @@ namespace MongoDB.Driver.Core.Servers
             }
         }
 
-        private async Task MonitorServer()
+        private async Task MonitorServerAsync()
         {
             var metronome = new Metronome(_settings.HeartbeatInterval);
             var heartbeatCancellationToken = _heartbeatCancellationTokenSource.Token;
@@ -212,14 +249,14 @@ namespace MongoDB.Driver.Core.Servers
             {
                 try
                 {
-                    await HeartbeatAsync(heartbeatCancellationToken);
+                    await HeartbeatAsync(heartbeatCancellationToken).ConfigureAwait(false);
                     var newHeartbeatDelay = new HeartbeatDelay(metronome.GetNextTickDelay(), __minHeartbeatInterval);
                     var oldHeartbeatDelay = Interlocked.Exchange(ref _heartbeatDelay, newHeartbeatDelay);
                     if (oldHeartbeatDelay != null)
                     {
                         oldHeartbeatDelay.Dispose();
                     }
-                    await newHeartbeatDelay.Task;
+                    await newHeartbeatDelay.Task.ConfigureAwait(false);
                 }
                 catch
                 {
@@ -272,6 +309,8 @@ namespace MongoDB.Driver.Core.Servers
 
                 newDescription = _baseDescription.With(
                     averageRoundTripTime: averageRoundTripTimeRounded,
+                    canonicalEndPoint: isMasterResult.Me,
+                    electionId: isMasterResult.ElectionId,
                     maxBatchCount: isMasterResult.MaxBatchCount,
                     maxDocumentSize: isMasterResult.MaxDocumentSize,
                     maxMessageSize: isMasterResult.MaxMessageSize,
@@ -300,9 +339,9 @@ namespace MongoDB.Driver.Core.Servers
         private async Task<HeartbeatInfo> GetHeartbeatInfoAsync(IConnection connection, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (_listener != null)
+            if (_heartbeatStartedEventHandler != null)
             {
-                _listener.ServerBeforeHeartbeating(new ServerBeforeHeartbeatingEvent(connection.ConnectionId));
+                _heartbeatStartedEventHandler(new ServerHeartbeatStartedEvent(connection.ConnectionId));
             }
 
             try
@@ -329,9 +368,9 @@ namespace MongoDB.Driver.Core.Servers
                 var buildInfoResultRocument = await buildInfoCommand.ExecuteAsync(connection, cancellationToken).ConfigureAwait(false);
                 var buildInfoResult = new BuildInfoResult(buildInfoResultRocument);
 
-                if (_listener != null)
+                if (_heartbeatSucceededEventHandler != null)
                 {
-                    _listener.ServerAfterHeartbeating(new ServerAfterHeartbeatingEvent(connection.ConnectionId, stopwatch.Elapsed));
+                    _heartbeatSucceededEventHandler(new ServerHeartbeatSucceededEvent(connection.ConnectionId, stopwatch.Elapsed));
                 }
 
                 return new HeartbeatInfo
@@ -343,9 +382,9 @@ namespace MongoDB.Driver.Core.Servers
             }
             catch (Exception ex)
             {
-                if (_listener != null)
+                if (_heartbeatFailedEventHandler != null)
                 {
-                    _listener.ServerErrorHeartbeating(new ServerErrorHeartbeatingEvent(connection.ConnectionId, ex));
+                    _heartbeatFailedEventHandler(new ServerHeartbeatFailedEvent(connection.ConnectionId, ex));
                 }
                 throw;
             }
@@ -362,9 +401,9 @@ namespace MongoDB.Driver.Core.Servers
 
             var args = new ServerDescriptionChangedEventArgs(oldDescription, newDescription);
 
-            if (_listener != null)
+            if (_descriptionChangedEventHandler != null)
             {
-                _listener.ServerAfterDescriptionChanged(new ServerAfterDescriptionChangedEvent(oldDescription, newDescription));
+                _descriptionChangedEventHandler(new ServerDescriptionChangedEvent(oldDescription, newDescription));
             }
 
             var handler = DescriptionChanged;
@@ -471,10 +510,31 @@ namespace MongoDB.Driver.Core.Servers
             }
 
             // methods
-            public Task<TResult> CommandAsync<TResult>(
+            public TResult Command<TResult>(
                 DatabaseNamespace databaseNamespace,
                 BsonDocument command,
                 IElementNameValidator commandValidator,
+                bool slaveOk,
+                IBsonSerializer<TResult> resultSerializer,
+                MessageEncoderSettings messageEncoderSettings,
+                CancellationToken cancellationToken)
+            {
+                return Command(databaseNamespace,
+                    command,
+                    commandValidator,
+                    () => CommandResponseHandling.Return,
+                    slaveOk,
+                    resultSerializer,
+                    messageEncoderSettings,
+                    cancellationToken);
+            }
+
+            // methods
+            public TResult Command<TResult>(
+                DatabaseNamespace databaseNamespace,
+                BsonDocument command,
+                IElementNameValidator commandValidator,
+                Func<CommandResponseHandling> responseHandling,
                 bool slaveOk,
                 IBsonSerializer<TResult> resultSerializer,
                 MessageEncoderSettings messageEncoderSettings,
@@ -485,6 +545,49 @@ namespace MongoDB.Driver.Core.Servers
                     databaseNamespace,
                     command,
                     commandValidator,
+                    responseHandling,
+                    slaveOk,
+                    resultSerializer,
+                    messageEncoderSettings);
+
+                return ExecuteProtocol(protocol, cancellationToken);
+            }
+
+            public Task<TResult> CommandAsync<TResult>(
+                DatabaseNamespace databaseNamespace,
+                BsonDocument command,
+                IElementNameValidator commandValidator,
+                bool slaveOk,
+                IBsonSerializer<TResult> resultSerializer,
+                MessageEncoderSettings messageEncoderSettings,
+                CancellationToken cancellationToken)
+            {
+                return CommandAsync(databaseNamespace,
+                    command,
+                    commandValidator,
+                    () => CommandResponseHandling.Return,
+                    slaveOk,
+                    resultSerializer,
+                    messageEncoderSettings,
+                    cancellationToken);
+            }
+
+            public Task<TResult> CommandAsync<TResult>(
+                DatabaseNamespace databaseNamespace,
+                BsonDocument command,
+                IElementNameValidator commandValidator,
+                Func<CommandResponseHandling> responseHandling,
+                bool slaveOk,
+                IBsonSerializer<TResult> resultSerializer,
+                MessageEncoderSettings messageEncoderSettings,
+                CancellationToken cancellationToken)
+            {
+                slaveOk = GetEffectiveSlaveOk(slaveOk);
+                var protocol = new CommandWireProtocol<TResult>(
+                    databaseNamespace,
+                    command,
+                    commandValidator,
+                    responseHandling,
                     slaveOk,
                     resultSerializer,
                     messageEncoderSettings);
@@ -499,6 +602,24 @@ namespace MongoDB.Driver.Core.Servers
                     _connection.Dispose();
                     _disposed = true;
                 }
+            }
+
+            public WriteConcernResult Delete(
+                CollectionNamespace collectionNamespace,
+                BsonDocument query,
+                bool isMulti,
+                MessageEncoderSettings messageEncoderSettings,
+                WriteConcern writeConcern,
+                CancellationToken cancellationToken)
+            {
+                var protocol = new DeleteWireProtocol(
+                    collectionNamespace,
+                    query,
+                    isMulti,
+                    messageEncoderSettings,
+                    writeConcern);
+
+                return ExecuteProtocol(protocol, cancellationToken);
             }
 
             public Task<WriteConcernResult> DeleteAsync(
@@ -519,7 +640,7 @@ namespace MongoDB.Driver.Core.Servers
                 return ExecuteProtocolAsync(protocol, cancellationToken);
             }
 
-            public Task<CursorBatch<TDocument>> GetMoreAsync<TDocument>(
+            public CursorBatch<TDocument> GetMore<TDocument>(
                 CollectionNamespace collectionNamespace,
                 BsonDocument query,
                 long cursorId,
@@ -536,10 +657,30 @@ namespace MongoDB.Driver.Core.Servers
                     serializer,
                     messageEncoderSettings);
 
+                return ExecuteProtocol(protocol, cancellationToken);
+            }
+
+            public Task<CursorBatch<TDocument>> GetMoreAsync<TDocument>(
+              CollectionNamespace collectionNamespace,
+              BsonDocument query,
+              long cursorId,
+              int batchSize,
+              IBsonSerializer<TDocument> serializer,
+              MessageEncoderSettings messageEncoderSettings,
+              CancellationToken cancellationToken)
+            {
+                var protocol = new GetMoreWireProtocol<TDocument>(
+                    collectionNamespace,
+                    query,
+                    cursorId,
+                    batchSize,
+                    serializer,
+                    messageEncoderSettings);
+
                 return ExecuteProtocolAsync(protocol, cancellationToken);
             }
 
-            public Task<WriteConcernResult> InsertAsync<TDocument>(
+            public WriteConcernResult Insert<TDocument>(
                 CollectionNamespace collectionNamespace,
                 WriteConcern writeConcern,
                 IBsonSerializer<TDocument> serializer,
@@ -562,10 +703,36 @@ namespace MongoDB.Driver.Core.Servers
                     continueOnError,
                     shouldSendGetLastError);
 
+                return ExecuteProtocol(protocol, cancellationToken);
+            }
+
+            public Task<WriteConcernResult> InsertAsync<TDocument>(
+               CollectionNamespace collectionNamespace,
+               WriteConcern writeConcern,
+               IBsonSerializer<TDocument> serializer,
+               MessageEncoderSettings messageEncoderSettings,
+               BatchableSource<TDocument> documentSource,
+               int? maxBatchCount,
+               int? maxMessageSize,
+               bool continueOnError,
+               Func<bool> shouldSendGetLastError,
+               CancellationToken cancellationToken)
+            {
+                var protocol = new InsertWireProtocol<TDocument>(
+                    collectionNamespace,
+                    writeConcern,
+                    serializer,
+                    messageEncoderSettings,
+                    documentSource,
+                    maxBatchCount,
+                    maxMessageSize,
+                    continueOnError,
+                    shouldSendGetLastError);
+
                 return ExecuteProtocolAsync(protocol, cancellationToken);
             }
 
-            public Task KillCursorsAsync(
+            public void KillCursors(
                 IEnumerable<long> cursorIds,
                 MessageEncoderSettings messageEncoderSettings,
                 CancellationToken cancellationToken)
@@ -574,10 +741,22 @@ namespace MongoDB.Driver.Core.Servers
                     cursorIds,
                     messageEncoderSettings);
 
+                ExecuteProtocol(protocol, cancellationToken);
+            }
+
+            public Task KillCursorsAsync(
+              IEnumerable<long> cursorIds,
+              MessageEncoderSettings messageEncoderSettings,
+              CancellationToken cancellationToken)
+            {
+                var protocol = new KillCursorsWireProtocol(
+                    cursorIds,
+                    messageEncoderSettings);
+
                 return ExecuteProtocolAsync(protocol, cancellationToken);
             }
 
-            public Task<CursorBatch<TDocument>> QueryAsync<TDocument>(
+            public CursorBatch<TDocument> Query<TDocument>(
                 CollectionNamespace collectionNamespace,
                 BsonDocument query,
                 BsonDocument fields,
@@ -587,6 +766,7 @@ namespace MongoDB.Driver.Core.Servers
                 bool slaveOk,
                 bool partialOk,
                 bool noCursorTimeout,
+                bool oplogReplay,
                 bool tailableCursor,
                 bool awaitData,
                 IBsonSerializer<TDocument> serializer,
@@ -604,6 +784,44 @@ namespace MongoDB.Driver.Core.Servers
                     slaveOk,
                     partialOk,
                     noCursorTimeout,
+                    oplogReplay,
+                    tailableCursor,
+                    awaitData,
+                    serializer,
+                    messageEncoderSettings);
+
+                return ExecuteProtocol(protocol, cancellationToken);
+            }
+
+            public Task<CursorBatch<TDocument>> QueryAsync<TDocument>(
+             CollectionNamespace collectionNamespace,
+             BsonDocument query,
+             BsonDocument fields,
+             IElementNameValidator queryValidator,
+             int skip,
+             int batchSize,
+             bool slaveOk,
+             bool partialOk,
+             bool noCursorTimeout,
+             bool oplogReplay,
+             bool tailableCursor,
+             bool awaitData,
+             IBsonSerializer<TDocument> serializer,
+             MessageEncoderSettings messageEncoderSettings,
+             CancellationToken cancellationToken)
+            {
+                slaveOk = GetEffectiveSlaveOk(slaveOk);
+                var protocol = new QueryWireProtocol<TDocument>(
+                    collectionNamespace,
+                    query,
+                    fields,
+                    queryValidator,
+                    skip,
+                    batchSize,
+                    slaveOk,
+                    partialOk,
+                    noCursorTimeout,
+                    oplogReplay,
                     tailableCursor,
                     awaitData,
                     serializer,
@@ -612,7 +830,7 @@ namespace MongoDB.Driver.Core.Servers
                 return ExecuteProtocolAsync(protocol, cancellationToken);
             }
 
-            public Task<WriteConcernResult> UpdateAsync(
+            public WriteConcernResult Update(
                 CollectionNamespace collectionNamespace,
                 MessageEncoderSettings messageEncoderSettings,
                 WriteConcern writeConcern,
@@ -633,7 +851,57 @@ namespace MongoDB.Driver.Core.Servers
                     isMulti,
                     isUpsert);
 
+                return ExecuteProtocol(protocol, cancellationToken);
+            }
+
+            public Task<WriteConcernResult> UpdateAsync(
+               CollectionNamespace collectionNamespace,
+               MessageEncoderSettings messageEncoderSettings,
+               WriteConcern writeConcern,
+               BsonDocument query,
+               BsonDocument update,
+               IElementNameValidator updateValidator,
+               bool isMulti,
+               bool isUpsert,
+               CancellationToken cancellationToken)
+            {
+                var protocol = new UpdateWireProtocol(
+                    collectionNamespace,
+                    messageEncoderSettings,
+                    writeConcern,
+                    query,
+                    update,
+                    updateValidator,
+                    isMulti,
+                    isUpsert);
+
                 return ExecuteProtocolAsync(protocol, cancellationToken);
+            }
+
+            private void ExecuteProtocol(IWireProtocol protocol, CancellationToken cancellationToken)
+            {
+                try
+                {
+                    protocol.Execute(_connection, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _server.HandleChannelException(_connection, ex);
+                    throw;
+                }
+            }
+
+            private TResult ExecuteProtocol<TResult>(IWireProtocol<TResult> protocol, CancellationToken cancellationToken)
+            {
+                try
+                {
+                    return protocol.Execute(_connection, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _server.HandleChannelException(_connection, ex);
+                    throw;
+                }
             }
 
             private async Task ExecuteProtocolAsync(IWireProtocol protocol, CancellationToken cancellationToken)

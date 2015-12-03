@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -35,7 +35,7 @@ namespace MongoDB.Driver.Core.Clusters.ServerSelectors
         /// <param name="selector">The selector.</param>
         public DelegateServerSelector(Func<ClusterDescription, IEnumerable<ServerDescription>, IEnumerable<ServerDescription>> selector)
         {
-            _selector = Ensure.IsNotNull(selector, "selector");
+            _selector = Ensure.IsNotNull(selector, nameof(selector));
         }
 
         // methods

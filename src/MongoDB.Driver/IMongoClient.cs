@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -30,9 +30,24 @@ namespace MongoDB.Driver
     public interface IMongoClient
     {
         /// <summary>
+        /// Gets the cluster.
+        /// </summary>
+        /// <value>
+        /// The cluster.
+        /// </value>
+        ICluster Cluster { get; }
+
+        /// <summary>
         /// Gets the settings.
         /// </summary>
         MongoClientSettings Settings { get; }
+
+        /// <summary>
+        /// Drops the database with the specified name.
+        /// </summary>
+        /// <param name="name">The name of the database to drop.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        void DropDatabase(string name, CancellationToken cancellationToken = default(CancellationToken));
 
         /// <summary>
         /// Drops the database with the specified name.
@@ -49,6 +64,13 @@ namespace MongoDB.Driver
         /// <param name="settings">The database settings.</param>
         /// <returns>An implementation of a database.</returns>
         IMongoDatabase GetDatabase(string name, MongoDatabaseSettings settings = null);
+
+        /// <summary>
+        /// Lists the databases on the server.
+        /// </summary>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>A cursor.</returns>
+        IAsyncCursor<BsonDocument> ListDatabases(CancellationToken cancellationToken = default(CancellationToken));
 
         /// <summary>
         /// Lists the databases on the server.

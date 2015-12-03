@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -30,6 +30,7 @@ namespace MongoDB.Driver.Core.Operations
     public class MapReduceOutputToCollectionOperation : MapReduceOperationBase, IWriteOperation<BsonDocument>
     {
         // fields
+        private bool? _bypassDocumentValidation;
         private bool? _nonAtomicOutput;
         private readonly CollectionNamespace _outputCollectionNamespace;
         private MapReduceOutputMode _outputMode;
@@ -56,11 +57,23 @@ namespace MongoDB.Driver.Core.Operations
                 reduceFunction,
                 messageEncoderSettings)
         {
-            _outputCollectionNamespace = Ensure.IsNotNull(outputCollectionNamespace, "outputCollectionNamespace");
+            _outputCollectionNamespace = Ensure.IsNotNull(outputCollectionNamespace, nameof(outputCollectionNamespace));
             _outputMode = MapReduceOutputMode.Replace;
         }
 
         // properties
+        /// <summary>
+        /// Gets or sets a value indicating whether to bypass document validation.
+        /// </summary>
+        /// <value>
+        /// A value indicating whether to bypass document validation.
+        /// </value>
+        public bool? BypassDocumentValidation
+        {
+            get { return _bypassDocumentValidation; }
+            set { _bypassDocumentValidation = value; }
+        }
+
         /// <summary>
         /// Gets or sets a value indicating whether the server should not lock the database for merge and reduce output modes.
         /// </summary>
@@ -110,6 +123,17 @@ namespace MongoDB.Driver.Core.Operations
 
         // methods
         /// <inheritdoc/>
+        protected internal override BsonDocument CreateCommand(SemanticVersion serverVersion)
+        {
+            var command = base.CreateCommand(serverVersion);
+            if (_bypassDocumentValidation.HasValue && SupportedFeatures.IsBypassDocumentValidationSupported(serverVersion))
+            {
+                command["bypassDocumentValidation"] = _bypassDocumentValidation.Value;
+            }
+            return command;
+        }
+
+        /// <inheritdoc/>
         protected override BsonDocument CreateOutputOptions()
         {
             var action = _outputMode.ToString().ToLowerInvariant();
@@ -123,12 +147,37 @@ namespace MongoDB.Driver.Core.Operations
         }
 
         /// <inheritdoc/>
-        public Task<BsonDocument> ExecuteAsync(IWriteBinding binding, CancellationToken cancellationToken)
+        public BsonDocument Execute(IWriteBinding binding, CancellationToken cancellationToken)
         {
-            Ensure.IsNotNull(binding, "binding");
-            var command = CreateCommand();
-            var operation = new WriteCommandOperation<BsonDocument>(CollectionNamespace.DatabaseNamespace, command, BsonDocumentSerializer.Instance, MessageEncoderSettings);
-            return operation.ExecuteAsync(binding, cancellationToken);
+            Ensure.IsNotNull(binding, nameof(binding));
+
+            using (var channelSource = binding.GetWriteChannelSource(cancellationToken))
+            using (var channel = channelSource.GetChannel(cancellationToken))
+            using (var channelBinding = new ChannelReadWriteBinding(channelSource.Server, channel))
+            {
+                var operation = CreateOperation(channel.ConnectionDescription.ServerVersion);
+                return operation.Execute(channelBinding, cancellationToken);
+            }
+        }
+
+        /// <inheritdoc/>
+        public async Task<BsonDocument> ExecuteAsync(IWriteBinding binding, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNull(binding, nameof(binding));
+
+            using (var channelSource = await binding.GetWriteChannelSourceAsync(cancellationToken).ConfigureAwait(false))
+            using (var channel = await channelSource.GetChannelAsync(cancellationToken).ConfigureAwait(false))
+            using (var channelBinding = new ChannelReadWriteBinding(channelSource.Server, channel))
+            {
+                var operation = CreateOperation(channel.ConnectionDescription.ServerVersion);
+                return await operation.ExecuteAsync(channelBinding, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        private WriteCommandOperation<BsonDocument> CreateOperation(SemanticVersion serverVersion)
+        {
+            var command = CreateCommand(serverVersion);
+            return new WriteCommandOperation<BsonDocument>(CollectionNamespace.DatabaseNamespace, command, BsonDocumentSerializer.Instance, MessageEncoderSettings);
         }
     }
 }

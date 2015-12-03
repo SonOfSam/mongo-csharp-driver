@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -60,9 +60,9 @@ namespace MongoDB.Driver.Core.Operations
             string indexName,
             MessageEncoderSettings messageEncoderSettings)
         {
-            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, "collectionNamespace");
-            _indexName = Ensure.IsNotNullOrEmpty(indexName, "indexName");
-            _messageEncoderSettings = Ensure.IsNotNull(messageEncoderSettings, "messageEncoderSettings");
+            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, nameof(collectionNamespace));
+            _indexName = Ensure.IsNotNullOrEmpty(indexName, nameof(indexName));
+            _messageEncoderSettings = Ensure.IsNotNull(messageEncoderSettings, nameof(messageEncoderSettings));
         }
 
         // properties
@@ -109,24 +109,53 @@ namespace MongoDB.Driver.Core.Operations
             };
         }
 
-        /// <inheritdoc/>
-        public async Task<BsonDocument> ExecuteAsync(IWriteBinding binding, CancellationToken cancellationToken)
+        private WriteCommandOperation<BsonDocument> CreateOperation()
         {
-            Ensure.IsNotNull(binding, "binding");
             var command = CreateCommand();
-            var operation = new WriteCommandOperation<BsonDocument>(_collectionNamespace.DatabaseNamespace, command, BsonDocumentSerializer.Instance, _messageEncoderSettings);
+            return new WriteCommandOperation<BsonDocument>(_collectionNamespace.DatabaseNamespace, command, BsonDocumentSerializer.Instance, _messageEncoderSettings);
+        }
+
+        /// <inheritdoc/>
+        public BsonDocument Execute(IWriteBinding binding, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNull(binding, nameof(binding));
             try
             {
-                return await operation.ExecuteAsync(binding, cancellationToken).ConfigureAwait(false);
+                var operation = CreateOperation();
+                return operation.Execute(binding, cancellationToken);
             }
             catch (MongoCommandException ex)
             {
-                if (ex.ErrorMessage != null && ex.ErrorMessage.Contains("ns not found"))
+                if (ShouldIgnoreException(ex))
                 {
                     return ex.Result;
                 }
                 throw;
             }
+        }
+
+        /// <inheritdoc/>
+        public async Task<BsonDocument> ExecuteAsync(IWriteBinding binding, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNull(binding, nameof(binding));
+            try
+            {
+                var operation = CreateOperation();
+                return await operation.ExecuteAsync(binding, cancellationToken).ConfigureAwait(false);
+            }
+            catch (MongoCommandException ex)
+            {
+                if (ShouldIgnoreException(ex))
+                {
+                    return ex.Result;
+                }
+                throw;
+            }
+        }
+
+        private bool ShouldIgnoreException(MongoCommandException ex)
+        {
+            return ex.ErrorMessage != null && ex.ErrorMessage.Contains("ns not found");
         }
     }
 }

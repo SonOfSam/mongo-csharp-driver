@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -47,9 +47,9 @@ namespace MongoDB.Driver.Core.Operations
         /// <param name="messageEncoderSettings">The message encoder settings.</param>
         public AggregateExplainOperation(CollectionNamespace collectionNamespace, IEnumerable<BsonDocument> pipeline, MessageEncoderSettings messageEncoderSettings)
         {
-            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, "collectionNamespace");
-            _pipeline = Ensure.IsNotNull(pipeline, "pipeline").ToList();
-            _messageEncoderSettings = Ensure.IsNotNull(messageEncoderSettings, "messageEncoderSettings");
+            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, nameof(collectionNamespace));
+            _pipeline = Ensure.IsNotNull(pipeline, nameof(pipeline)).ToList();
+            _messageEncoderSettings = Ensure.IsNotNull(messageEncoderSettings, nameof(messageEncoderSettings));
         }
 
         // properties
@@ -124,17 +124,27 @@ namespace MongoDB.Driver.Core.Operations
         }
 
         /// <inheritdoc/>
+        public BsonDocument Execute(IReadBinding binding, CancellationToken cancellationToken)
+        {
+            var operation = CreateOperation();
+            return operation.Execute(binding, cancellationToken);
+        }
+
+        /// <inheritdoc/>
         public Task<BsonDocument> ExecuteAsync(IReadBinding binding, CancellationToken cancellationToken)
         {
-            var command = CreateCommand();
+            var operation = CreateOperation();
+            return operation.ExecuteAsync(binding, cancellationToken);
+        }
 
-            var operation = new ReadCommandOperation<BsonDocument>(
+        private ReadCommandOperation<BsonDocument> CreateOperation()
+        {
+            var command = CreateCommand();
+            return new ReadCommandOperation<BsonDocument>(
                 _collectionNamespace.DatabaseNamespace,
                 command,
                 BsonDocumentSerializer.Instance,
                 _messageEncoderSettings);
-
-            return operation.ExecuteAsync(binding, cancellationToken);
         }
     }
 }

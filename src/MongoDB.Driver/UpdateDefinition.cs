@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -66,19 +66,6 @@ namespace MongoDB.Driver
             }
             return new JsonUpdateDefinition<TDocument>(json);
         }
-
-        /// <summary>
-        /// Implements the operator +.
-        /// </summary>
-        /// <param name="lhs">The LHS.</param>
-        /// <param name="rhs">The RHS.</param>
-        /// <returns>
-        /// The result of the operator.
-        /// </returns>
-        public static UpdateDefinition<TDocument> operator +(UpdateDefinition<TDocument> lhs, UpdateDefinition<TDocument> rhs)
-        {
-            return new CombinedUpdateDefinition<TDocument>(new[] { lhs, rhs });
-        }
     }
 
     /// <summary>
@@ -95,7 +82,7 @@ namespace MongoDB.Driver
         /// <param name="document">The document.</param>
         public BsonDocumentUpdateDefinition(BsonDocument document)
         {
-            _document = Ensure.IsNotNull(document, "document");
+            _document = Ensure.IsNotNull(document, nameof(document));
         }
 
         /// <summary>
@@ -127,7 +114,7 @@ namespace MongoDB.Driver
         /// <param name="json">The json.</param>
         public JsonUpdateDefinition(string json)
         {
-            _json = Ensure.IsNotNullOrEmpty(json, "json");
+            _json = Ensure.IsNotNullOrEmpty(json, nameof(json));
         }
 
         /// <summary>
@@ -159,7 +146,7 @@ namespace MongoDB.Driver
         /// <param name="obj">The object.</param>
         public ObjectUpdateDefinition(object obj)
         {
-            _obj = Ensure.IsNotNull(obj, "obj");
+            _obj = Ensure.IsNotNull(obj, nameof(obj));
         }
 
         /// <summary>

@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ using MongoDB.Driver.Linq;
 using MongoDB.Driver.Linq.Expressions;
 using MongoDB.Driver.Linq.Processors;
 using MongoDB.Driver.Linq.Translators;
-using MongoDB.Driver.Linq.Utils;
 
 namespace MongoDB.Driver
 {
@@ -32,6 +31,16 @@ namespace MongoDB.Driver
     /// <typeparam name="TDocument">The type of the document.</typeparam>
     public abstract class FilterDefinition<TDocument>
     {
+        private static readonly FilterDefinition<TDocument> __empty = new EmptyFilterDefinition<TDocument>();
+
+        /// <summary>
+        /// Gets an empty filter. An empty filter matches everything.
+        /// </summary>
+        public static FilterDefinition<TDocument> Empty
+        {
+            get { return __empty; }
+        }
+
         /// <summary>
         /// Renders the filter to a <see cref="BsonDocument"/>.
         /// </summary>
@@ -144,7 +153,7 @@ namespace MongoDB.Driver
         /// <param name="document">The document.</param>
         public BsonDocumentFilterDefinition(BsonDocument document)
         {
-            _document = Ensure.IsNotNull(document, "document");
+            _document = Ensure.IsNotNull(document, nameof(document));
         }
 
         /// <summary>
@@ -162,6 +171,15 @@ namespace MongoDB.Driver
         }
     }
 
+    internal sealed class EmptyFilterDefinition<TDocument> : FilterDefinition<TDocument>
+    {
+        /// <inheritdoc />
+        public override BsonDocument Render(IBsonSerializer<TDocument> documentSerializer, IBsonSerializerRegistry serializerRegistry)
+        {
+            return new BsonDocument();
+        }
+    }
+
     /// <summary>
     /// An <see cref="Expression"/> based filter.
     /// </summary>
@@ -176,7 +194,7 @@ namespace MongoDB.Driver
         /// <param name="expression">The expression.</param>
         public ExpressionFilterDefinition(Expression<Func<TDocument, bool>> expression)
         {
-            _expression = Ensure.IsNotNull(expression, "expression");
+            _expression = Ensure.IsNotNull(expression, nameof(expression));
         }
 
         /// <summary>
@@ -208,7 +226,7 @@ namespace MongoDB.Driver
         /// <param name="json">The json.</param>
         public JsonFilterDefinition(string json)
         {
-            _json = Ensure.IsNotNullOrEmpty(json, "json");
+            _json = Ensure.IsNotNullOrEmpty(json, nameof(json));
         }
 
         /// <summary>
@@ -240,7 +258,7 @@ namespace MongoDB.Driver
         /// <param name="obj">The object.</param>
         public ObjectFilterDefinition(object obj)
         {
-            _obj = Ensure.IsNotNull(obj, "obj");
+            _obj = Ensure.IsNotNull(obj, nameof(obj));
         }
 
         /// <summary>

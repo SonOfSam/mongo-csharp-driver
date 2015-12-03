@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 * limitations under the License.
 */
 
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -48,13 +49,15 @@ namespace MongoDB.Driver.Operations
         }
 
         // methods
-        public async Task<IEnumerable<BsonDocument>> ExecuteAsync(IReadBinding binding, CancellationToken cancellationToken)
+        public IEnumerable<BsonDocument> Execute(IReadBinding binding, CancellationToken cancellationToken)
         {
-            using (var channelSource = await binding.GetReadChannelSourceAsync(cancellationToken).ConfigureAwait(false))
+            using (var channelSource = binding.GetReadChannelSource(cancellationToken))
+            using (var channel = channelSource.GetChannel(cancellationToken))
+            using (var channelBinding = new ChannelReadBinding(channelSource.Server, channel, binding.ReadPreference))
             {
                 IReadOperation<IEnumerable<BsonDocument>> operation;
 
-                if (channelSource.ServerDescription.Version >= __serverVersionSupportingUserManagementCommands)
+                if (channel.ConnectionDescription.ServerVersion >= __serverVersionSupportingUserManagementCommands)
                 {
                     operation = new FindUsersUsingUserManagementCommandsOperation(_databaseNamespace, _username, _messageEncoderSettings);
                 }
@@ -63,8 +66,13 @@ namespace MongoDB.Driver.Operations
                     operation = new FindUsersUsingSystemUsersCollectionOperation(_databaseNamespace, _username, _messageEncoderSettings);
                 }
 
-                return await operation.ExecuteAsync(channelSource, binding.ReadPreference, cancellationToken).ConfigureAwait(false);
+                return operation.Execute(channelBinding, cancellationToken);
             }
+        }
+
+        public Task<IEnumerable<BsonDocument>> ExecuteAsync(IReadBinding binding, CancellationToken cancellationToken)
+        {
+            throw new NotSupportedException();
         }
     }
 }

@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -35,7 +35,7 @@ namespace MongoDB.Driver.Core.Clusters.ServerSelectors
         /// <param name="selectors">The selectors.</param>
         public CompositeServerSelector(IEnumerable<IServerSelector> selectors)
         {
-            Ensure.IsNotNull(selectors, "selectors");
+            Ensure.IsNotNull(selectors, nameof(selectors));
             _selectors = selectors.ToList();
         }
 

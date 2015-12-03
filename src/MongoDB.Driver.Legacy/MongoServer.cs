@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -43,7 +43,10 @@ namespace MongoDB.Driver
         /// <summary>
         /// Gets a MongoServer object using this client's settings.
         /// </summary>
-        /// <returns>A MongoServer.</returns>
+        /// <param name="client">The client.</param>
+        /// <returns>
+        /// A MongoServer.
+        /// </returns>
         [Obsolete("Use the new API instead.")]
         public static MongoServer GetServer(this MongoClient client)
         {
@@ -235,14 +238,12 @@ namespace MongoDB.Driver
         /// <summary>
         /// Gets the passive instances.
         /// </summary>
+        [Obsolete("Passives are treated the same as secondaries.")]
         public virtual MongoServerInstance[] Passives
         {
             get
             {
-                lock (_serverLock)
-                {
-                    return _serverInstances.Where(i => i.IsPassive).ToArray();
-                }
+                return new MongoServerInstance[0];
             }
         }
 
@@ -387,6 +388,7 @@ namespace MongoDB.Driver
         /// <summary>
         /// Gets the current state of this server (as of the last operation, not updated until another operation is performed).
         /// </summary>
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Design", "CA1065:DoNotRaiseExceptionsInUnexpectedLocations")]
         public virtual MongoServerState State
         {
             get
@@ -490,10 +492,10 @@ namespace MongoDB.Driver
         {
             var readPreference = _settings.ReadPreference;
             var readPreferenceServerSelector = new ReadPreferenceServerSelector(readPreference);
-            _cluster.SelectServerAsync(readPreferenceServerSelector, CancellationToken.None)
-                .WithTimeout(timeout)
-                .GetAwaiter()
-                .GetResult();
+            using (var timeoutCancellationTokenSource = new CancellationTokenSource(timeout))
+            {
+                _cluster.SelectServer(readPreferenceServerSelector, timeoutCancellationTokenSource.Token);
+            }
         }
 
         /// <summary>
@@ -622,7 +624,7 @@ namespace MongoDB.Driver
         {
             var messageEncoderSettings = GetMessageEncoderSettings();
             var operation = new ListDatabasesOperation(messageEncoderSettings);
-            var list = ExecuteReadOperation(operation).ToListAsync().GetAwaiter().GetResult();
+            var list = ExecuteReadOperation(operation).ToList();
             return list.Select(x => (string)x["name"]).OrderBy(name => name);
         }
 
@@ -814,7 +816,7 @@ namespace MongoDB.Driver
             readPreference = readPreference ?? _settings.ReadPreference ?? ReadPreference.Primary;
             using (var binding = GetReadBinding(readPreference))
             {
-                return operation.Execute(binding);
+                return operation.Execute(binding, CancellationToken.None);
             }
         }
 
@@ -822,7 +824,7 @@ namespace MongoDB.Driver
         {
             using (var binding = GetWriteBinding())
             {
-                return operation.Execute(binding);
+                return operation.Execute(binding, CancellationToken.None);
             }
         }
 
@@ -869,8 +871,8 @@ namespace MongoDB.Driver
 
             IReadBindingHandle channelBinding;
             ConnectionId connectionId;
-            var server = _cluster.SelectServer(serverSelector);
-            using (var channel = server.GetChannel())
+            var server = _cluster.SelectServer(serverSelector, CancellationToken.None);
+            using (var channel = server.GetChannel(CancellationToken.None))
             {
                 if (readPreference.ReadPreferenceMode == ReadPreferenceMode.Primary)
                 {

@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -49,10 +49,10 @@ namespace MongoDB.Driver.Core.WireProtocol
             Func<bool> shouldSendGetLastError = null)
             : base(collectionNamespace, messageEncoderSettings, writeConcern, shouldSendGetLastError)
         {
-            _serializer = Ensure.IsNotNull(serializer, "serializer");
-            _documentSource = Ensure.IsNotNull(documentSource, "documentSource");
-            _maxBatchCount = Ensure.IsNullOrGreaterThanZero(maxBatchCount, "maxBatchCount");
-            _maxMessageSize = Ensure.IsNullOrGreaterThanZero(maxMessageSize, "maxMessageSize");
+            _serializer = Ensure.IsNotNull(serializer, nameof(serializer));
+            _documentSource = Ensure.IsNotNull(documentSource, nameof(documentSource));
+            _maxBatchCount = Ensure.IsNullOrGreaterThanZero(maxBatchCount, nameof(maxBatchCount));
+            _maxMessageSize = Ensure.IsNullOrGreaterThanZero(maxMessageSize, nameof(maxMessageSize));
             _continueOnError = continueOnError;
         }
 

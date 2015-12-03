@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -13,6 +13,8 @@
 * limitations under the License.
 */
 
+using System;
+using System.Linq.Expressions;
 using FluentAssertions;
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization;
@@ -126,6 +128,70 @@ namespace MongoDB.Driver.Tests
         }
 
         [Test]
+        public void BitsAllClear()
+        {
+            var subject = CreateSubject<BsonDocument>();
+
+            Assert(subject.BitsAllClear("a", 43), "{a: {$bitsAllClear: 43}}");
+        }
+
+        [Test]
+        public void BitsAllClear_Typed()
+        {
+            var subject = CreateSubject<Person>();
+
+            Assert(subject.BitsAllClear(x => x.Age, 43), "{age: {$bitsAllClear: 43}}");
+        }
+
+        [Test]
+        public void BitsAllSet()
+        {
+            var subject = CreateSubject<BsonDocument>();
+
+            Assert(subject.BitsAllSet("a", 43), "{a: {$bitsAllSet: 43}}");
+        }
+
+        [Test]
+        public void BitsAllSet_Typed()
+        {
+            var subject = CreateSubject<Person>();
+
+            Assert(subject.BitsAllSet(x => x.Age, 43), "{age: {$bitsAllSet: 43}}");
+        }
+
+        [Test]
+        public void BitsAnyClear()
+        {
+            var subject = CreateSubject<BsonDocument>();
+
+            Assert(subject.BitsAnyClear("a", 43), "{a: {$bitsAnyClear: 43}}");
+        }
+
+        [Test]
+        public void BitsAnyClear_Typed()
+        {
+            var subject = CreateSubject<Person>();
+
+            Assert(subject.BitsAnyClear(x => x.Age, 43), "{age: {$bitsAnyClear: 43}}");
+        }
+
+        [Test]
+        public void BitsAnySet()
+        {
+            var subject = CreateSubject<BsonDocument>();
+
+            Assert(subject.BitsAnySet("a", 43), "{a: {$bitsAnySet: 43}}");
+        }
+
+        [Test]
+        public void BitsAnySet_Typed()
+        {
+            var subject = CreateSubject<Person>();
+
+            Assert(subject.BitsAnySet(x => x.Age, 43), "{age: {$bitsAnySet: 43}}");
+        }
+
+        [Test]
         public void ElemMatch()
         {
             var subject = CreateSubject<BsonDocument>();
@@ -138,9 +204,25 @@ namespace MongoDB.Driver.Tests
         {
             var subject = CreateSubject<Person>();
 
-            Assert(subject.ElemMatch<Pet>("Pets", "{Name: 'Fluffy'}"), "{pets: {$elemMatch: {Name: 'Fluffy'}}}");
+            Assert(subject.ElemMatch<Animal>("Pets", "{Name: 'Fluffy'}"), "{pets: {$elemMatch: {Name: 'Fluffy'}}}");
             Assert(subject.ElemMatch(x => x.Pets, "{Name: 'Fluffy'}"), "{pets: {$elemMatch: {Name: 'Fluffy'}}}");
             Assert(subject.ElemMatch(x => x.Pets, x => x.Name == "Fluffy"), "{pets: {$elemMatch: {name: 'Fluffy'}}}");
+        }
+
+        [Test]
+        public void Empty()
+        {
+            var subject = CreateSubject<BsonDocument>();
+
+            Assert(subject.Empty, "{}");
+        }
+
+        [Test]
+        public void Empty_Typed()
+        {
+            var subject = CreateSubject<Person>();
+
+            Assert(subject.Empty, "{}");
         }
 
         [Test]
@@ -212,8 +294,8 @@ namespace MongoDB.Driver.Tests
                 GeoJson.Geographic(41, 19),
                 GeoJson.Geographic(40, 18));
 
-            Assert(subject.GeoIntersects(x => x.Age, poly), "{age: {$geoIntersects: {$geometry: {type: 'Polygon', coordinates: [[[40.0, 18.0], [40.0, 19.0], [41.0, 19.0], [40.0, 18.0]]]}}}}");
-            Assert(subject.GeoIntersects("Age", poly), "{age: {$geoIntersects: {$geometry: {type: 'Polygon', coordinates: [[[40.0, 18.0], [40.0, 19.0], [41.0, 19.0], [40.0, 18.0]]]}}}}");
+            Assert(subject.GeoIntersects(x => x.Location, poly), "{loc: {$geoIntersects: {$geometry: {type: 'Polygon', coordinates: [[[40.0, 18.0], [40.0, 19.0], [41.0, 19.0], [40.0, 18.0]]]}}}}");
+            Assert(subject.GeoIntersects("Location", poly), "{loc: {$geoIntersects: {$geometry: {type: 'Polygon', coordinates: [[[40.0, 18.0], [40.0, 19.0], [41.0, 19.0], [40.0, 18.0]]]}}}}");
         }
 
         [Test]
@@ -226,8 +308,8 @@ namespace MongoDB.Driver.Tests
                 GeoJson.Geographic(41, 19),
                 GeoJson.Geographic(40, 18));
 
-            Assert(subject.GeoIntersects(x => x.Age, poly), "{age: {$geoIntersects: {$geometry: {type: 'Polygon', coordinates: [[[40.0, 18.0], [40.0, 19.0], [41.0, 19.0], [40.0, 18.0]]]}}}}");
-            Assert(subject.GeoIntersects("Age", poly), "{age: {$geoIntersects: {$geometry: {type: 'Polygon', coordinates: [[[40.0, 18.0], [40.0, 19.0], [41.0, 19.0], [40.0, 18.0]]]}}}}");
+            Assert(subject.GeoIntersects(x => x.Location, poly), "{loc: {$geoIntersects: {$geometry: {type: 'Polygon', coordinates: [[[40.0, 18.0], [40.0, 19.0], [41.0, 19.0], [40.0, 18.0]]]}}}}");
+            Assert(subject.GeoIntersects("Location", poly), "{loc: {$geoIntersects: {$geometry: {type: 'Polygon', coordinates: [[[40.0, 18.0], [40.0, 19.0], [41.0, 19.0], [40.0, 18.0]]]}}}}");
         }
 
         [Test]
@@ -254,8 +336,8 @@ namespace MongoDB.Driver.Tests
                 GeoJson.Geographic(41, 19),
                 GeoJson.Geographic(40, 18));
 
-            Assert(subject.GeoWithin(x => x.Age, poly), "{age: {$geoWithin: {$geometry: {type: 'Polygon', coordinates: [[[40.0, 18.0], [40.0, 19.0], [41.0, 19.0], [40.0, 18.0]]]}}}}");
-            Assert(subject.GeoWithin("Age", poly), "{age: {$geoWithin: {$geometry: {type: 'Polygon', coordinates: [[[40.0, 18.0], [40.0, 19.0], [41.0, 19.0], [40.0, 18.0]]]}}}}");
+            Assert(subject.GeoWithin(x => x.Location, poly), "{loc: {$geoWithin: {$geometry: {type: 'Polygon', coordinates: [[[40.0, 18.0], [40.0, 19.0], [41.0, 19.0], [40.0, 18.0]]]}}}}");
+            Assert(subject.GeoWithin("Location", poly), "{loc: {$geoWithin: {$geometry: {type: 'Polygon', coordinates: [[[40.0, 18.0], [40.0, 19.0], [41.0, 19.0], [40.0, 18.0]]]}}}}");
         }
 
         [Test]
@@ -263,7 +345,7 @@ namespace MongoDB.Driver.Tests
         {
             var subject = CreateSubject<BsonDocument>();
 
-            Assert(subject.GeoWithinBox("x", 10, 20), "{x: {$geoWithin: {$box: [10.0, 20.0]}}}");
+            Assert(subject.GeoWithinBox("x", 10, 20, 30, 40), "{x: {$geoWithin: {$box: [[10.0, 20.0], [30.0, 40.0]]}}}");
         }
 
         [Test]
@@ -271,8 +353,8 @@ namespace MongoDB.Driver.Tests
         {
             var subject = CreateSubject<Person>();
 
-            Assert(subject.GeoWithinBox(x => x.Age, 10, 20), "{age: {$geoWithin: {$box: [10.0, 20.0]}}}");
-            Assert(subject.GeoWithinBox("Age", 10, 20), "{age: {$geoWithin: {$box: [10.0, 20.0]}}}");
+            Assert(subject.GeoWithinBox(x => x.Location, 10, 20, 30, 40), "{loc: {$geoWithin: {$box: [[10.0, 20.0], [30.0, 40.0]]}}}");
+            Assert(subject.GeoWithinBox("Location", 10, 20, 30, 40), "{loc: {$geoWithin: {$box: [[10.0, 20.0], [30.0, 40.0]]}}}");
         }
 
         [Test]
@@ -288,8 +370,8 @@ namespace MongoDB.Driver.Tests
         {
             var subject = CreateSubject<Person>();
 
-            Assert(subject.GeoWithinCenter(x => x.Age, 10, 20, 30), "{age: {$geoWithin: {$center: [[10.0, 20.0], 30.0]}}}");
-            Assert(subject.GeoWithinCenter("Age", 10, 20, 30), "{age: {$geoWithin: {$center: [[10.0, 20.0], 30.0]}}}");
+            Assert(subject.GeoWithinCenter(x => x.Location, 10, 20, 30), "{loc: {$geoWithin: {$center: [[10.0, 20.0], 30.0]}}}");
+            Assert(subject.GeoWithinCenter("Location", 10, 20, 30), "{loc: {$geoWithin: {$center: [[10.0, 20.0], 30.0]}}}");
         }
 
         [Test]
@@ -305,8 +387,8 @@ namespace MongoDB.Driver.Tests
         {
             var subject = CreateSubject<Person>();
 
-            Assert(subject.GeoWithinCenterSphere(x => x.Age, 10, 20, 30), "{age: {$geoWithin: {$centerSphere: [[10.0, 20.0], 30.0]}}}");
-            Assert(subject.GeoWithinCenterSphere("Age", 10, 20, 30), "{age: {$geoWithin: {$centerSphere: [[10.0, 20.0], 30.0]}}}");
+            Assert(subject.GeoWithinCenterSphere(x => x.Location, 10, 20, 30), "{loc: {$geoWithin: {$centerSphere: [[10.0, 20.0], 30.0]}}}");
+            Assert(subject.GeoWithinCenterSphere("Location", 10, 20, 30), "{loc: {$geoWithin: {$centerSphere: [[10.0, 20.0], 30.0]}}}");
         }
 
         [Test]
@@ -322,8 +404,8 @@ namespace MongoDB.Driver.Tests
         {
             var subject = CreateSubject<Person>();
 
-            Assert(subject.GeoWithinPolygon(x => x.Age, new[,] { { 1d, 2d }, { 3d, 4d } }), "{age: {$geoWithin: {$polygon: [[1.0, 2.0], [3.0, 4.0]]}}}");
-            Assert(subject.GeoWithinPolygon("Age", new[,] { { 1d, 2d }, { 3d, 4d } }), "{age: {$geoWithin: {$polygon: [[1.0, 2.0], [3.0, 4.0]]}}}");
+            Assert(subject.GeoWithinPolygon(x => x.Location, new[,] { { 1d, 2d }, { 3d, 4d } }), "{loc: {$geoWithin: {$polygon: [[1.0, 2.0], [3.0, 4.0]]}}}");
+            Assert(subject.GeoWithinPolygon("Location", new[,] { { 1d, 2d }, { 3d, 4d } }), "{loc: {$geoWithin: {$polygon: [[1.0, 2.0], [3.0, 4.0]]}}}");
         }
 
         [Test]
@@ -668,6 +750,39 @@ namespace MongoDB.Driver.Tests
         }
 
         [Test]
+        public void OfType_Typed()
+        {
+            var subject = CreateSubject<Person>();
+
+            // test OfType overloads that apply to the document as a whole
+            Assert(subject.OfType<Twin>(), "{ _t : \"Twin\" }");
+            Assert(subject.OfType<Twin>(Builders<Twin>.Filter.Eq(p => p.WasBornFirst, true)), "{ _t : \"Twin\", wasBornFirst : true }");
+            Assert(subject.OfType<Twin>("{ wasBornFirst : true }"), "{ _t : \"Twin\", wasBornFirst : true }");
+            Assert(subject.OfType<Twin>(BsonDocument.Parse("{ wasBornFirst : true }")), "{ _t : \"Twin\", wasBornFirst : true }");
+            Assert(subject.OfType<Twin>(p => p.WasBornFirst), "{ _t : \"Twin\", wasBornFirst : true }");
+
+            // test multiple OfType filters against same document
+            var personFilter = Builders<Person>.Filter.Or(
+                subject.OfType<Twin>(p => p.WasBornFirst),
+                subject.OfType<Triplet>(p => p.BirthOrder == 1));
+            Assert(personFilter, "{ $or : [{ _t : \"Twin\", wasBornFirst : true }, { _t : \"Triplet\", birthOrder : 1 }] }");
+
+            // test OfType overloads that apply to a field of the document
+            Assert(subject.OfType<Animal, Cat>("favoritePet"), "{ \"favoritePet._t\" : \"Cat\" }");
+            Assert(subject.OfType<Animal, Cat>("favoritePet", Builders<Cat>.Filter.Eq(c => c.LivesLeft, 9)), "{ \"favoritePet._t\" : \"Cat\", \"favoritePet.livesLeft\" : 9 }");
+            Assert(subject.OfType<Animal, Cat>("favoritePet", "{ livesLeft : 9 }"), "{ \"favoritePet._t\" : \"Cat\", \"favoritePet.livesLeft\" : 9 }");
+            Assert(subject.OfType<Animal, Cat>("favoritePet", BsonDocument.Parse("{ livesLeft : 9 }")), "{ \"favoritePet._t\" : \"Cat\", \"favoritePet.livesLeft\" : 9 }");
+            Assert(subject.OfType<Animal, Cat>(p => p.FavoritePet), "{ \"favoritePet._t\" : \"Cat\" }");
+            Assert(subject.OfType<Animal, Cat>(p => p.FavoritePet, c => c.LivesLeft == 9), "{ \"favoritePet._t\" : \"Cat\", \"favoritePet.livesLeft\" : 9 }");
+
+            // test multiple OfType filters against same field
+            var animalFilter = Builders<Person>.Filter.Or(
+                subject.OfType<Animal, Cat>(p => p.FavoritePet, c => c.LivesLeft == 9),
+                subject.OfType<Animal, Dog>(p => p.FavoritePet, d => d.IsLapDog));
+            Assert(animalFilter, "{ $or : [{ \"favoritePet._t\" : \"Cat\", \"favoritePet.livesLeft\" : 9 }, { \"favoritePet._t\" : \"Dog\", \"favoritePet.isLapDog\" : true }] }");
+        }
+
+        [Test]
         public void Or()
         {
             var subject = CreateSubject<BsonDocument>();
@@ -755,6 +870,9 @@ namespace MongoDB.Driver.Tests
             var subject = CreateSubject<BsonDocument>();
             Assert(subject.Text("funny"), "{$text: {$search: 'funny'}}");
             Assert(subject.Text("funny", "en"), "{$text: {$search: 'funny', $language: 'en'}}");
+            Assert(subject.Text("funny", new TextSearchOptions { Language = "en" }), "{$text: {$search: 'funny', $language: 'en'}}");
+            Assert(subject.Text("funny", new TextSearchOptions { CaseSensitive = true }), "{$text: {$search: 'funny', $caseSensitive: true}}");
+            Assert(subject.Text("funny", new TextSearchOptions { DiacriticSensitive = true }), "{$text: {$search: 'funny', $diacriticSensitive: true}}");
         }
 
         [Test]
@@ -766,11 +884,40 @@ namespace MongoDB.Driver.Tests
         }
 
         [Test]
+        public void Type_string()
+        {
+            var subject = CreateSubject<BsonDocument>();
+
+            Assert(subject.Type("x", "string"), "{x: {$type: \"string\"}}");
+        }
+
+        [Test]
         public void Type_Typed()
         {
             var subject = CreateSubject<Person>();
             Assert(subject.Type(x => x.FirstName, BsonType.String), "{fn: {$type: 2}}");
             Assert(subject.Type("FirstName", BsonType.String), "{fn: {$type: 2}}");
+        }
+
+        [Test]
+        public void Type_Typed_string()
+        {
+            var subject = CreateSubject<Person>();
+            Assert(subject.Type(x => x.FirstName, "string"), "{fn: {$type: \"string\"}}");
+            Assert(subject.Type("FirstName", "string"), "{fn: {$type: \"string\"}}");
+        }
+
+        [Test]
+        public void Generic_type_constraint_causing_base_class_conversion()
+        {
+            var filter = TypeConstrainedFilter<Twin>(21);
+
+            Assert(filter, "{ age: 21 }");
+        }
+
+        private FilterDefinition<T> TypeConstrainedFilter<T>(int age) where T : Person
+        {
+            return CreateSubject<T>().Eq(x => x.Age, age);
         }
 
         private void Assert<TDocument>(FilterDefinition<TDocument> filter, string expected)
@@ -802,14 +949,48 @@ namespace MongoDB.Driver.Tests
             [BsonElement("age")]
             public int Age { get; set; }
 
+            [BsonElement("favoritePet")]
+            public Animal FavoritePet { get; set; }
+
             [BsonElement("pets")]
-            public Pet[] Pets { get; set; }
+            public Animal[] Pets { get; set; }
+
+            [BsonElement("loc")]
+            public int[] Location { get; set; }
         }
 
-        private class Pet
+        private class Twin : Person
+        {
+            [BsonElement("wasBornFirst")]
+            public bool WasBornFirst { get; set; }
+        }
+
+        private class Triplet : Person
+        {
+            [BsonElement("birthOrder")]
+            public int BirthOrder { get; set; }
+        }
+
+        private abstract class Animal
         {
             [BsonElement("name")]
             public string Name { get; set; }
+        }
+
+        private abstract class Mammal : Animal
+        {
+        }
+
+        private class Cat : Mammal
+        {
+            [BsonElement("livesLeft")]
+            public int LivesLeft { get; set; }
+        }
+
+        private class Dog : Mammal
+        {
+            [BsonElement("isLapDog")]
+            public bool IsLapDog { get; set; }
         }
     }
 }

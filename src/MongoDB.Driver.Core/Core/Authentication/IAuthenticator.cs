@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -32,6 +32,14 @@ namespace MongoDB.Driver.Core.Authentication
         /// The name.
         /// </value>
         string Name { get; }
+
+        /// <summary>
+        /// Authenticates the connection.
+        /// </summary>
+        /// <param name="connection">The connection.</param>
+        /// <param name="description">The connection description.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        void Authenticate(IConnection connection, ConnectionDescription description, CancellationToken cancellationToken);
 
         /// <summary>
         /// Authenticates the connection.

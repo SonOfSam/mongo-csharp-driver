@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+﻿/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -151,9 +151,9 @@ namespace MongoDB.Bson.IO
         public override BsonType ReadBsonType()
         {
             if (Disposed) { ThrowObjectDisposedException(); }
-            if (State == BsonReaderState.Initial || State == BsonReaderState.Done || State == BsonReaderState.ScopeDocument)
+            if (State == BsonReaderState.Initial || State == BsonReaderState.ScopeDocument)
             {
-                if (State == BsonReaderState.Initial || State == BsonReaderState.Done)
+                if (State == BsonReaderState.Initial)
                 {
                     _buffer.ResetBuffer();
                 }
@@ -375,7 +375,7 @@ namespace MongoDB.Bson.IO
             var subType = binaryData.SubType;
             if (subType != BsonBinarySubType.Binary && subType != BsonBinarySubType.OldBinary)
             {
-                var message = string.Format("ReadBytes requires the binary sub type to be Binary, not {2}.", subType);
+                var message = string.Format("ReadBytes requires the binary sub type to be Binary, not {0}.", subType);
                 throw new FormatException(message);
             }
 
@@ -431,7 +431,7 @@ namespace MongoDB.Bson.IO
             {
                 case ContextType.Array: State = BsonReaderState.Type; break;
                 case ContextType.Document: State = BsonReaderState.Type; break;
-                case ContextType.TopLevel: State = BsonReaderState.Done; break;
+                case ContextType.TopLevel: State = BsonReaderState.Initial; break;
                 default: throw new BsonInternalException("Unexpected ContextType.");
             }
 
@@ -474,7 +474,7 @@ namespace MongoDB.Bson.IO
             {
                 case ContextType.Array: State = BsonReaderState.Type; break;
                 case ContextType.Document: State = BsonReaderState.Type; break;
-                case ContextType.TopLevel: State = BsonReaderState.Done; break;
+                case ContextType.TopLevel: State = BsonReaderState.Initial; break;
                 default: throw new BsonInternalException("Unexpected ContextType");
             }
 
@@ -867,7 +867,7 @@ namespace MongoDB.Bson.IO
                 case ContextType.Document:
                     return BsonReaderState.Type;
                 case ContextType.TopLevel:
-                    return BsonReaderState.Done;
+                    return BsonReaderState.Initial;
                 default:
                     throw new BsonInternalException("Unexpected ContextType.");
             }
@@ -905,24 +905,37 @@ namespace MongoDB.Bson.IO
         private BsonValue ParseBinDataExtendedJson()
         {
             VerifyToken(":");
+
             var bytesToken = PopToken();
             if (bytesToken.Type != JsonTokenType.String)
             {
                 var message = string.Format("JSON reader expected a string but found '{0}'.", bytesToken.Lexeme);
                 throw new FormatException(message);
             }
+            var bytes = Convert.FromBase64String(bytesToken.StringValue);
+
             VerifyToken(",");
             VerifyString("$type");
             VerifyToken(":");
+
+            BsonBinarySubType subType;
             var subTypeToken = PopToken();
-            if (subTypeToken.Type != JsonTokenType.String)
+            if (subTypeToken.Type == JsonTokenType.String)
             {
-                var message = string.Format("JSON reader expected a string but found '{0}'.", subTypeToken.Lexeme);
+                subType = (BsonBinarySubType)Convert.ToInt32(subTypeToken.StringValue, 16);
+            }
+            else if (subTypeToken.Type == JsonTokenType.Int32 || subTypeToken.Type == JsonTokenType.Int64)
+            {
+                subType = (BsonBinarySubType)subTypeToken.Int32Value;
+            }
+            else
+            {
+                var message = string.Format("JSON reader expected a string or integer but found '{0}'.", subTypeToken.Lexeme);
                 throw new FormatException(message);
             }
+
             VerifyToken("}");
-            var bytes = Convert.FromBase64String(bytesToken.StringValue);
-            var subType = (BsonBinarySubType)Convert.ToInt32(subTypeToken.StringValue, 16);
+
             GuidRepresentation guidRepresentation;
             switch (subType)
             {
@@ -930,6 +943,7 @@ namespace MongoDB.Bson.IO
                 case BsonBinarySubType.UuidStandard: guidRepresentation = GuidRepresentation.Standard; break;
                 default: guidRepresentation = GuidRepresentation.Unspecified; break;
             }
+
             return new BsonBinaryData(bytes, subType, guidRepresentation);
         }
 
@@ -984,7 +998,7 @@ namespace MongoDB.Bson.IO
                     value = codeToken.StringValue;
                     return BsonType.JavaScript;
                 default:
-                    var message = string.Format("JSON reader expected ',' or '}' but found '{0}'.", codeToken.Lexeme);
+                    var message = string.Format("JSON reader expected ',' or '}}' but found '{0}'.", codeToken.Lexeme);
                     throw new FormatException(message);
             }
         }
@@ -1017,16 +1031,37 @@ namespace MongoDB.Bson.IO
             else if (valueToken.Type == JsonTokenType.String)
             {
                 DateTime dateTime;
-                if (!DateTime.TryParse(valueToken.StringValue, out dateTime))
+                var dateTimeStyles = DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal;
+                if (!DateTime.TryParse(valueToken.StringValue, CultureInfo.InvariantCulture, dateTimeStyles, out dateTime))
                 {
                     var message = string.Format("Invalid $date string: '{0}'.", valueToken.StringValue);
                     throw new FormatException(message);
                 }
                 millisecondsSinceEpoch = BsonUtils.ToMillisecondsSinceEpoch(dateTime);
             }
+            else if (valueToken.Type == JsonTokenType.BeginObject)
+            {
+                VerifyToken("$numberLong");
+                VerifyToken(":");
+                var millisecondsSinceEpochToken = PopToken();
+                if (millisecondsSinceEpochToken.Type == JsonTokenType.String)
+                {
+                    millisecondsSinceEpoch = long.Parse(millisecondsSinceEpochToken.StringValue, CultureInfo.InvariantCulture);
+                }
+                else if (millisecondsSinceEpochToken.Type == JsonTokenType.Int32 || millisecondsSinceEpochToken.Type == JsonTokenType.Int64)
+                {
+                    millisecondsSinceEpoch = millisecondsSinceEpochToken.Int64Value;
+                }
+                else
+                {
+                    var message = string.Format("JSON reader expected an integer or a string for {{ $date : {{ $numberLong : ... }} }} but found a '{0}'.", valueToken.Lexeme);
+                    throw new FormatException(message);
+                }
+                VerifyToken("}");
+            }
             else
             {
-                var message = string.Format("JSON reader expected an integer or an ISO 8601 string for $date but found a '{0}'.", valueToken.Lexeme);
+                var message = string.Format("JSON reader expected an ISO 8601 string, an integer, or {{ $numberLong : ... }} for $date but found a '{0}'.", valueToken.Lexeme);
                 throw new FormatException(message);
             }
 
@@ -1379,7 +1414,7 @@ namespace MongoDB.Bson.IO
                 throw new FormatException(message);
             }
             VerifyToken(")");
-            return new BsonInt32(value);
+            return (BsonInt32)value;
         }
 
         private BsonValue ParseNumberLongConstructor()
@@ -1401,20 +1436,31 @@ namespace MongoDB.Bson.IO
                 throw new FormatException(message);
             }
             VerifyToken(")");
-            return new BsonInt64(value);
+            return (BsonInt64)value;
         }
 
         private BsonValue ParseNumberLongExtendedJson()
         {
             VerifyToken(":");
+
+            long value;
             var valueToken = PopToken();
-            if (valueToken.Type != JsonTokenType.String)
+            if (valueToken.Type == JsonTokenType.String)
             {
-                var message = string.Format("JSON reader expected a string but found '{0}'.", valueToken.Lexeme);
+                value = long.Parse(valueToken.StringValue, CultureInfo.InvariantCulture);
+            }
+            else if (valueToken.Type == JsonTokenType.Int32 || valueToken.Type == JsonTokenType.Int64)
+            {
+                value = valueToken.Int64Value;
+            }
+            else
+            {
+                var message = string.Format("JSON reader expected a string or an integer but found '{0}'.", valueToken.Lexeme);
                 throw new FormatException(message);
             }
+
             VerifyToken("}");
-            return new BsonInt64(long.Parse(valueToken.StringValue));
+            return (BsonInt64)value;
         }
 
         private BsonValue ParseObjectIdConstructor()
@@ -1513,7 +1559,7 @@ namespace MongoDB.Bson.IO
                 throw new FormatException(message);
             }
             VerifyToken("}");
-            return new BsonString(nameToken.StringValue); // will be converted to a BsonSymbol at a higher level
+            return (BsonString)nameToken.StringValue; // will be converted to a BsonSymbol at a higher level
         }
 
         private BsonValue ParseTimestampConstructor()

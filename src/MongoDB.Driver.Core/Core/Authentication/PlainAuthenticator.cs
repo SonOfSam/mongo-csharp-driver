@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -67,7 +67,7 @@ namespace MongoDB.Driver.Core.Authentication
             // constructors
             public PlainMechanism(UsernamePasswordCredential credential)
             {
-                _credential = Ensure.IsNotNull(credential, "credential");
+                _credential = Ensure.IsNotNull(credential, nameof(credential));
             }
 
             // properties
@@ -79,8 +79,8 @@ namespace MongoDB.Driver.Core.Authentication
             // methods
             public ISaslStep Initialize(IConnection connection, ConnectionDescription description)
             {
-                Ensure.IsNotNull(connection, "connection");
-                Ensure.IsNotNull(description, "description");
+                Ensure.IsNotNull(connection, nameof(connection));
+                Ensure.IsNotNull(description, nameof(description));
 
                 var dataString = string.Format("\0{0}\0{1}",
                     _credential.Username,

@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+﻿/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -49,7 +49,9 @@ namespace MongoDB.Driver.Core.Authentication
         }
 
         [Test]
-        public void AuthenticateAsync_should_throw_an_AuthenticationException_when_authentication_fails()
+        public void Authenticate_should_throw_an_AuthenticationException_when_authentication_fails(
+            [Values(false, true)]
+            bool async)
         {
             var subject = new ScramSha1Authenticator(__credential);
 
@@ -57,57 +59,87 @@ namespace MongoDB.Driver.Core.Authentication
             var connection = new MockConnection(__serverId);
             connection.EnqueueReplyMessage(reply);
 
-            Action act = () => subject.AuthenticateAsync(connection, __description, CancellationToken.None).Wait();
+            Action act;
+            if (async)
+            {
+                act = () => subject.AuthenticateAsync(connection, __description, CancellationToken.None).GetAwaiter().GetResult();
+            }
+            else
+            {
+                act = () => subject.Authenticate(connection, __description, CancellationToken.None);
+            }
 
             act.ShouldThrow<MongoAuthenticationException>();
         }
 
         [Test]
-        public void AuthenticateAsync_should_throw_when_server_provides_invalid_r_value()
+        public void Authenticate_should_throw_when_server_provides_invalid_r_value(
+            [Values(false, true)]
+            bool async)
         {
             var randomStringGenerator = new ConstantRandomStringGenerator("fyko+d2lbbFgONRv9qkxdawL");
             var subject = new ScramSha1Authenticator(__credential, randomStringGenerator);
 
-            var saslStartReply = MessageHelper.BuildSuccessReply<RawBsonDocument>(
+            var saslStartReply = MessageHelper.BuildReply<RawBsonDocument>(
                 RawBsonDocumentHelper.FromJson("{conversationId: 1, payload: BinData(0,\"cj1meWtvLWQybGJiRmdPTlJ2OXFreGRhd0xIbytWZ2s3cXZVT0tVd3VXTElXZzRsLzlTcmFHTUhFRSxzPXJROVpZM01udEJldVAzRTFURFZDNHc9PSxpPTEwMDAw\"), done: false, ok: 1}"));
 
             var connection = new MockConnection(__serverId);
             connection.EnqueueReplyMessage(saslStartReply);
 
-            var currentRequestId = RequestMessage.CurrentGlobalRequestId;
-            Action act = () => subject.AuthenticateAsync(connection, __description, CancellationToken.None).Wait();
+            Action act;
+            if (async)
+            {
+                act = () => subject.AuthenticateAsync(connection, __description, CancellationToken.None).GetAwaiter().GetResult();
+            }
+            else
+            {
+                act = () => subject.Authenticate(connection, __description, CancellationToken.None);
+            }
+
             act.ShouldThrow<MongoAuthenticationException>();
         }
 
         [Test]
-        public void AuthenticateAsync_should_throw_when_server_provides_invalid_serverSignature()
+        public void Authenticate_should_throw_when_server_provides_invalid_serverSignature(
+            [Values(false, true)]
+            bool async)
         {
             var randomStringGenerator = new ConstantRandomStringGenerator("fyko+d2lbbFgONRv9qkxdawL");
             var subject = new ScramSha1Authenticator(__credential, randomStringGenerator);
 
-            var saslStartReply = MessageHelper.BuildSuccessReply<RawBsonDocument>(
+            var saslStartReply = MessageHelper.BuildReply<RawBsonDocument>(
                 RawBsonDocumentHelper.FromJson("{conversationId: 1, payload: BinData(0,\"cj1meWtvK2QybGJiRmdPTlJ2OXFreGRhd0xIbytWZ2s3cXZVT0tVd3VXTElXZzRsLzlTcmFHTUhFRSxzPXJROVpZM01udEJldVAzRTFURFZDNHc9PSxpPTEwMDAw\"), done: false, ok: 1}"));
-            var saslContinueReply = MessageHelper.BuildSuccessReply<RawBsonDocument>(
+            var saslContinueReply = MessageHelper.BuildReply<RawBsonDocument>(
                 RawBsonDocumentHelper.FromJson("{conversationId: 1, payload: BinData(0,\"dj1VTVdlSTI1SkQxeU5ZWlJNcFo0Vkh2aFo5ZTBh\"), done: true, ok: 1}"));
 
             var connection = new MockConnection(__serverId);
             connection.EnqueueReplyMessage(saslStartReply);
             connection.EnqueueReplyMessage(saslContinueReply);
 
-            var currentRequestId = RequestMessage.CurrentGlobalRequestId;
-            Action act = () => subject.AuthenticateAsync(connection, __description, CancellationToken.None).Wait();
+            Action act;
+            if (async)
+            {
+                act = () => subject.AuthenticateAsync(connection, __description, CancellationToken.None).GetAwaiter().GetResult();
+            }
+            else
+            {
+                act = () => subject.Authenticate(connection, __description, CancellationToken.None);
+            }
+
             act.ShouldThrow<MongoAuthenticationException>();
         }
 
         [Test]
-        public void AuthenticateAsync_should_not_throw_when_authentication_succeeds()
+        public void Authenticate_should_not_throw_when_authentication_succeeds(
+            [Values(false, true)]
+            bool async)
         {
             var randomStringGenerator = new ConstantRandomStringGenerator("fyko+d2lbbFgONRv9qkxdawL");
             var subject = new ScramSha1Authenticator(__credential, randomStringGenerator);
 
-            var saslStartReply = MessageHelper.BuildSuccessReply<RawBsonDocument>(
+            var saslStartReply = MessageHelper.BuildReply<RawBsonDocument>(
                 RawBsonDocumentHelper.FromJson("{conversationId: 1, payload: BinData(0,\"cj1meWtvK2QybGJiRmdPTlJ2OXFreGRhd0xIbytWZ2s3cXZVT0tVd3VXTElXZzRsLzlTcmFHTUhFRSxzPXJROVpZM01udEJldVAzRTFURFZDNHc9PSxpPTEwMDAw\"), done: false, ok: 1}"));
-            var saslContinueReply = MessageHelper.BuildSuccessReply<RawBsonDocument>(
+            var saslContinueReply = MessageHelper.BuildReply<RawBsonDocument>(
                 RawBsonDocumentHelper.FromJson("{conversationId: 1, payload: BinData(0,\"dj1VTVdlSTI1SkQxeU5ZWlJNcFo0Vkh2aFo5ZTA9\"), done: true, ok: 1}"));
 
             var connection = new MockConnection(__serverId);
@@ -115,7 +147,17 @@ namespace MongoDB.Driver.Core.Authentication
             connection.EnqueueReplyMessage(saslContinueReply);
 
             var currentRequestId = RequestMessage.CurrentGlobalRequestId;
-            Action act = () => subject.AuthenticateAsync(connection, __description, CancellationToken.None).Wait();
+
+            Action act;
+            if (async)
+            {
+                act = () => subject.AuthenticateAsync(connection, __description, CancellationToken.None).GetAwaiter().GetResult();
+            }
+            else
+            {
+                act = () => subject.Authenticate(connection, __description, CancellationToken.None);
+            }
+
             act.ShouldNotThrow();
 
             var sentMessages = MessageHelper.TranslateMessagesToBsonDocuments(connection.GetSentMessages());

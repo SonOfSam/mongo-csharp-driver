@@ -1,4 +1,19 @@
-﻿using System;
+﻿/* Copyright 2015 MongoDB Inc.
+*
+* Licensed under the Apache License, Version 2.0 (the "License");
+* you may not use this file except in compliance with the License.
+* You may obtain a copy of the License at
+*
+* http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+*/
+
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -25,7 +40,7 @@ namespace MongoDB.Driver.Core.Authentication
         /// <param name="mechanism">The mechanism.</param>
         protected SaslAuthenticator(ISaslMechanism mechanism)
         {
-            _mechanism = Ensure.IsNotNull(mechanism, "mechanism");
+            _mechanism = Ensure.IsNotNull(mechanism, nameof(mechanism));
         }
 
         // properties
@@ -45,63 +60,128 @@ namespace MongoDB.Driver.Core.Authentication
 
         // methods
         /// <inheritdoc/>
-        public async Task AuthenticateAsync(IConnection connection, ConnectionDescription description, CancellationToken cancellationToken)
+        public void Authenticate(IConnection connection, ConnectionDescription description, CancellationToken cancellationToken)
         {
-            Ensure.IsNotNull(connection, "connection");
-            Ensure.IsNotNull(description, "description");
+            Ensure.IsNotNull(connection, nameof(connection));
+            Ensure.IsNotNull(description, nameof(description));
 
             using (var conversation = new SaslConversation(description.ConnectionId))
             {
                 var currentStep = _mechanism.Initialize(connection, description);
 
-                var command = new BsonDocument
-                {
-                    { "saslStart", 1 },
-                    { "mechanism", _mechanism.Name },
-                    { "payload", currentStep.BytesToSendToServer }
-                };
-
+                var command = CreateStartCommand(currentStep);
                 while (true)
                 {
                     BsonDocument result;
                     try
                     {
-                        var protocol = new CommandWireProtocol<BsonDocument>(
-                            new DatabaseNamespace(DatabaseName),
-                            command,
-                            true,
-                            BsonDocumentSerializer.Instance,
-                            null);
-                        result = await protocol.ExecuteAsync(connection, cancellationToken).ConfigureAwait(false);
+                        var protocol = CreateCommandProtocol(command);
+                        result = protocol.Execute(connection, cancellationToken);
                     }
-                    catch(MongoCommandException ex)
+                    catch (MongoCommandException ex)
                     {
-                        var message = string.Format("Unable to authenticate using sasl protocol mechanism {0}.", Name);
-                        throw new MongoAuthenticationException(connection.ConnectionId, message, ex);
+                        throw CreateException(connection, ex);
                     }
 
-                    // we might be done here if the client is not expecting a reply from the server
-                    if (result.GetValue("done", false).ToBoolean() && currentStep.IsComplete)
+                    currentStep = Transition(conversation, currentStep, result);
+                    if (currentStep == null)
                     {
-                        break;
+                        return;
                     }
 
-                    currentStep = currentStep.Transition(conversation, result["payload"].AsByteArray);
-
-                    // we might be done here if the client had some final verification it needed to do
-                    if (result.GetValue("done", false).ToBoolean() && currentStep.IsComplete)
-                    {
-                        break;
-                    }
-
-                    command = new BsonDocument
-                    {
-                        { "saslContinue", 1 },
-                        { "conversationId", result["conversationId"].AsInt32 },
-                        { "payload", currentStep.BytesToSendToServer }
-                    };
+                    command = CreateContinueCommand(currentStep, result);
                 }
             }
+        }
+
+        /// <inheritdoc/>
+        public async Task AuthenticateAsync(IConnection connection, ConnectionDescription description, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNull(connection, nameof(connection));
+            Ensure.IsNotNull(description, nameof(description));
+
+            using (var conversation = new SaslConversation(description.ConnectionId))
+            {
+                var currentStep = _mechanism.Initialize(connection, description);
+
+                var command = CreateStartCommand(currentStep);
+                while (true)
+                {
+                    BsonDocument result;
+                    try
+                    {
+                        var protocol = CreateCommandProtocol(command);
+                        result = await protocol.ExecuteAsync(connection, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (MongoCommandException ex)
+                    {
+                        throw CreateException(connection, ex);
+                    }
+
+                    currentStep = Transition(conversation, currentStep, result);
+                    if (currentStep == null)
+                    {
+                        return;
+                    }
+
+                    command = CreateContinueCommand(currentStep, result);
+                }
+            }
+        }
+
+        private CommandWireProtocol<BsonDocument> CreateCommandProtocol(BsonDocument command)
+        {
+            return new CommandWireProtocol<BsonDocument>(
+                new DatabaseNamespace(DatabaseName),
+                command,
+                true,
+                BsonDocumentSerializer.Instance,
+                null);
+        }
+
+        private BsonDocument CreateContinueCommand(ISaslStep currentStep, BsonDocument result)
+        {
+            return new BsonDocument
+            {
+                { "saslContinue", 1 },
+                { "conversationId", result["conversationId"].AsInt32 },
+                { "payload", currentStep.BytesToSendToServer }
+            };
+        }
+
+        private MongoAuthenticationException CreateException(IConnection connection, Exception ex)
+        {
+            var message = string.Format("Unable to authenticate using sasl protocol mechanism {0}.", Name);
+            return new MongoAuthenticationException(connection.ConnectionId, message, ex);
+        }
+
+        private BsonDocument CreateStartCommand(ISaslStep currentStep)
+        {
+            return new BsonDocument
+            {
+                { "saslStart", 1 },
+                { "mechanism", _mechanism.Name },
+                { "payload", currentStep.BytesToSendToServer }
+            };
+        }
+
+        private ISaslStep Transition(SaslConversation conversation, ISaslStep currentStep, BsonDocument result)
+        {
+            // we might be done here if the client is not expecting a reply from the server
+            if (result.GetValue("done", false).ToBoolean() && currentStep.IsComplete)
+            {
+                return null;
+            }
+
+            currentStep = currentStep.Transition(conversation, result["payload"].AsByteArray);
+
+            // we might be done here if the client had some final verification it needed to do
+            if (result.GetValue("done", false).ToBoolean() && currentStep.IsComplete)
+            {
+                return null;
+            }
+
+            return currentStep;
         }
 
         // nested classes

@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -37,9 +37,9 @@ namespace MongoDB.Driver.Tests
             var connectionString =
                 "mongodb://user1:password1@somehost/?" +
                 "connect=direct;connectTimeout=123;uuidRepresentation=pythonLegacy;ipv6=true;" +
-                "maxIdleTime=124;maxLifeTime=125;maxPoolSize=126;minPoolSize=127;" +
+                "maxIdleTime=124;maxLifeTime=125;maxPoolSize=126;minPoolSize=127;readConcernLevel=majority;" +
                 "readPreference=secondary;readPreferenceTags=a:1,b:2;readPreferenceTags=c:3,d:4;localThreshold=128;socketTimeout=129;" +
-                "ssl=true;sslVerifyCertificate=false;waitqueuesize=130;waitQueueTimeout=131;" +
+                "serverSelectionTimeout=20s;ssl=true;sslVerifyCertificate=false;waitqueuesize=130;waitQueueTimeout=131;" +
                 "w=1;fsync=true;journal=true;w=2;wtimeout=131;gssapiServiceName=other";
             var builder = new MongoUrlBuilder(connectionString);
             var url = builder.ToMongoUrl();
@@ -103,12 +103,13 @@ namespace MongoDB.Driver.Tests
             Assert.AreEqual(MongoDefaults.MaxConnectionLifeTime, settings.MaxConnectionLifeTime);
             Assert.AreEqual(MongoDefaults.MaxConnectionPoolSize, settings.MaxConnectionPoolSize);
             Assert.AreEqual(MongoDefaults.MinConnectionPoolSize, settings.MinConnectionPoolSize);
-            Assert.AreEqual(MongoDefaults.OperationTimeout, settings.OperationTimeout);
+            Assert.AreEqual(ReadConcern.Default, settings.ReadConcern);
             Assert.AreEqual(ReadPreference.Primary, settings.ReadPreference);
             Assert.AreEqual(null, settings.ReplicaSetName);
             Assert.AreEqual(_localHost, settings.Server);
             Assert.AreEqual(_localHost, settings.Servers.First());
             Assert.AreEqual(1, settings.Servers.Count());
+            Assert.AreEqual(MongoDefaults.ServerSelectionTimeout, settings.ServerSelectionTimeout);
             Assert.AreEqual(MongoDefaults.SocketTimeout, settings.SocketTimeout);
             Assert.AreEqual(null, settings.SslSettings);
             Assert.AreEqual(false, settings.UseSsl);
@@ -162,11 +163,11 @@ namespace MongoDB.Driver.Tests
             Assert.IsFalse(clone.Equals(settings));
 
             clone = settings.Clone();
-            clone.MinConnectionPoolSize = settings.MinConnectionPoolSize + 1;
+            clone.ReadConcern = ReadConcern.Majority;
             Assert.IsFalse(clone.Equals(settings));
 
             clone = settings.Clone();
-            clone.OperationTimeout = TimeSpan.FromMilliseconds(20);
+            clone.MinConnectionPoolSize = settings.MinConnectionPoolSize + 1;
             Assert.IsFalse(clone.Equals(settings));
 
             clone = settings.Clone();
@@ -183,6 +184,10 @@ namespace MongoDB.Driver.Tests
 
             clone = settings.Clone();
             clone.Server = new MongoServerAddress("someotherhost");
+            Assert.IsFalse(clone.Equals(settings));
+
+            clone = settings.Clone();
+            clone.ServerSelectionTimeout = new TimeSpan(1, 2, 3);
             Assert.IsFalse(clone.Equals(settings));
 
             clone = settings.Clone();
@@ -236,9 +241,9 @@ namespace MongoDB.Driver.Tests
             var connectionString =
                 "mongodb://user1:password1@somehost/?authSource=db;authMechanismProperties=CANONICALIZE_HOST_NAME:true;" +
                 "connect=direct;connectTimeout=123;uuidRepresentation=pythonLegacy;ipv6=true;" +
-                "maxIdleTime=124;maxLifeTime=125;maxPoolSize=126;minPoolSize=127;" +
+                "maxIdleTime=124;maxLifeTime=125;maxPoolSize=126;minPoolSize=127;readConcernLevel=majority;" +
                 "readPreference=secondary;readPreferenceTags=a:1,b:2;readPreferenceTags=c:3,d:4;localThreshold=128;socketTimeout=129;" +
-                "ssl=true;sslVerifyCertificate=false;waitqueuesize=130;waitQueueTimeout=131;" +
+                "serverSelectionTimeout=20s;ssl=true;sslVerifyCertificate=false;waitqueuesize=130;waitQueueTimeout=131;" +
                 "w=1;fsync=true;journal=true;w=2;wtimeout=131;gssapiServiceName=other";
             var builder = new MongoUrlBuilder(connectionString);
             var url = builder.ToMongoUrl();
@@ -259,10 +264,12 @@ namespace MongoDB.Driver.Tests
             Assert.AreEqual(url.MaxConnectionLifeTime, settings.MaxConnectionLifeTime);
             Assert.AreEqual(url.MaxConnectionPoolSize, settings.MaxConnectionPoolSize);
             Assert.AreEqual(url.MinConnectionPoolSize, settings.MinConnectionPoolSize);
+            Assert.AreEqual(url.ReadConcernLevel, settings.ReadConcern.Level);
             Assert.AreEqual(url.ReadPreference, settings.ReadPreference);
             Assert.AreEqual(url.ReplicaSetName, settings.ReplicaSetName);
             Assert.AreEqual(url.LocalThreshold, settings.LocalThreshold);
             Assert.IsTrue(url.Servers.SequenceEqual(settings.Servers));
+            Assert.AreEqual(url.ServerSelectionTimeout, settings.ServerSelectionTimeout);
             Assert.AreEqual(url.SocketTimeout, settings.SocketTimeout);
             Assert.AreEqual(null, settings.SslSettings);
             Assert.AreEqual(url.UseSsl, settings.UseSsl);
@@ -390,18 +397,18 @@ namespace MongoDB.Driver.Tests
         }
 
         [Test]
-        public void TestOperationTimeout()
+        public void TestReadConcern()
         {
             var settings = new MongoClientSettings();
-            Assert.AreEqual(MongoDefaults.OperationTimeout, settings.OperationTimeout);
+            Assert.AreEqual(ReadConcern.Default, settings.ReadConcern);
 
-            var operationTimeout = new TimeSpan(1, 2, 3);
-            settings.OperationTimeout = operationTimeout;
-            Assert.AreEqual(operationTimeout, settings.OperationTimeout);
+            var readConcern = ReadConcern.Majority;
+            settings.ReadConcern = readConcern;
+            Assert.AreSame(readConcern, settings.ReadConcern);
 
             settings.Freeze();
-            Assert.AreEqual(operationTimeout, settings.OperationTimeout);
-            Assert.Throws<InvalidOperationException>(() => { settings.OperationTimeout = operationTimeout; });
+            Assert.AreEqual(readConcern, settings.ReadConcern);
+            Assert.Throws<InvalidOperationException>(() => { settings.ReadConcern = ReadConcern.Default; });
         }
 
         [Test]
@@ -521,6 +528,21 @@ namespace MongoDB.Driver.Tests
             SpinWait.SpinUntil(() => subject.Cluster.Description.State == ClusterState.Connected, TimeSpan.FromSeconds(4));
 
             Assert.That(socketConfiguratorWasCalled, Is.True);
+        }
+
+        [Test]
+        public void TestServerSelectionTimeout()
+        {
+            var settings = new MongoClientSettings();
+            Assert.AreEqual(MongoDefaults.ServerSelectionTimeout, settings.ServerSelectionTimeout);
+
+            var serverSelectionTimeout = new TimeSpan(1, 2, 3);
+            settings.ServerSelectionTimeout = serverSelectionTimeout;
+            Assert.AreEqual(serverSelectionTimeout, settings.ServerSelectionTimeout);
+
+            settings.Freeze();
+            Assert.AreEqual(serverSelectionTimeout, settings.ServerSelectionTimeout);
+            Assert.Throws<InvalidOperationException>(() => { settings.ServerSelectionTimeout = serverSelectionTimeout; });
         }
 
         [Test]
@@ -653,6 +675,7 @@ namespace MongoDB.Driver.Tests
                 ReplicaSetName = "rs",
                 LocalThreshold = TimeSpan.FromMilliseconds(20),
                 Servers = servers,
+                ServerSelectionTimeout = TimeSpan.FromSeconds(6),
                 SocketTimeout = TimeSpan.FromSeconds(4),
                 SslSettings = sslSettings,
                 UseSsl = true,
@@ -674,6 +697,7 @@ namespace MongoDB.Driver.Tests
             result.ReplicaSetName.Should().Be(subject.ReplicaSetName);
             result.LocalThreshold.Should().Be(subject.LocalThreshold);
             result.Servers.Should().Equal(subject.Servers);
+            result.ServerSelectionTimeout.Should().Be(subject.ServerSelectionTimeout);
             result.SocketTimeout.Should().Be(subject.SocketTimeout);
             result.SslSettings.Should().Be(subject.SslSettings);
             result.UseSsl.Should().Be(subject.UseSsl);

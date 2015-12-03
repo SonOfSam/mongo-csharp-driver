@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -14,6 +14,8 @@
 */
 
 using MongoDB.Bson;
+using MongoDB.Bson.Serialization;
+
 namespace MongoDB.Driver
 {
     /// <summary>
@@ -24,10 +26,14 @@ namespace MongoDB.Driver
         // fields
         private bool? _autoIndexId;
         private bool? _capped;
+        private IndexOptionDefaults _indexOptionDefaults;
         private long? _maxDocuments;
         private long? _maxSize;
         private BsonDocument _storageEngine;
         private bool? _usePowerOf2Sizes;
+        private IBsonSerializerRegistry _serializerRegistry;
+        private DocumentValidationAction? _validationAction;
+        private DocumentValidationLevel? _validationLevel;
 
         // properties
         /// <summary>
@@ -49,6 +55,18 @@ namespace MongoDB.Driver
         }
 
         /// <summary>
+        /// Gets or sets the index option defaults.
+        /// </summary>
+        /// <value>
+        /// The index option defaults.
+        /// </value>
+        public IndexOptionDefaults IndexOptionDefaults
+        {
+            get { return _indexOptionDefaults; }
+            set { _indexOptionDefaults = value; }
+        }
+
+        /// <summary>
         /// Gets or sets the maximum number of documents (used with capped collections).
         /// </summary>
         public long? MaxDocuments
@@ -67,6 +85,15 @@ namespace MongoDB.Driver
         }
 
         /// <summary>
+        /// Gets or sets the serializer registry.
+        /// </summary>
+        public IBsonSerializerRegistry SerializerRegistry
+        {
+            get { return _serializerRegistry; }
+            set { _serializerRegistry = value; }
+        }
+
+        /// <summary>
         /// Gets or sets the storage engine options.
         /// </summary>
         public BsonDocument StorageEngine
@@ -82,6 +109,97 @@ namespace MongoDB.Driver
         {
             get { return _usePowerOf2Sizes; }
             set { _usePowerOf2Sizes = value; }
+        }
+
+        /// <summary>
+        /// Gets or sets the validation action.
+        /// </summary>
+        /// <value>
+        /// The validation action.
+        /// </value>
+        public DocumentValidationAction? ValidationAction
+        {
+            get { return _validationAction; }
+            set { _validationAction = value; }
+        }
+
+        /// <summary>
+        /// Gets or sets the validation level.
+        /// </summary>
+        /// <value>
+        /// The validation level.
+        /// </value>
+        public DocumentValidationLevel? ValidationLevel
+        {
+            get { return _validationLevel; }
+            set { _validationLevel = value; }
+        }
+    }
+
+    /// <summary>
+    /// Options for creating a collection.
+    /// </summary>
+    /// <typeparam name="TDocument">The type of the document.</typeparam>
+    public sealed class CreateCollectionOptions<TDocument> : CreateCollectionOptions
+    {
+        #region static
+        // internal static methods
+        /// <summary>
+        /// Coerces a generic CreateCollectionOptions{TDocument} from a non-generic CreateCollectionOptions.
+        /// </summary>
+        /// <param name="options">The options.</param>
+        /// <returns>The generic options.</returns>
+        internal static CreateCollectionOptions<TDocument> CoercedFrom(CreateCollectionOptions options)
+        {
+            if (options == null)
+            {
+                return null;
+            }
+
+            if (options.GetType() == typeof(CreateCollectionOptions))
+            {
+                return new CreateCollectionOptions<TDocument>
+                {
+                    AutoIndexId = options.AutoIndexId,
+                    Capped = options.Capped,
+                    MaxDocuments = options.MaxDocuments,
+                    MaxSize = options.MaxSize,
+                    SerializerRegistry = options.SerializerRegistry,
+                    StorageEngine = options.StorageEngine,
+                    UsePowerOf2Sizes = options.UsePowerOf2Sizes,
+                    ValidationAction = options.ValidationAction,
+                    ValidationLevel = options.ValidationLevel                  
+                };
+            }
+
+            return (CreateCollectionOptions<TDocument>)options;
+        }
+        #endregion
+
+        // private fields
+        private IBsonSerializer<TDocument> _documentSerializer;
+        private FilterDefinition<TDocument> _validator;
+
+        // public properties
+        /// <summary>
+        /// Gets or sets the document serializer.
+        /// </summary>
+        public IBsonSerializer<TDocument> DocumentSerializer
+        {
+            get { return _documentSerializer; }
+            set { _documentSerializer = value; }
+        }
+
+        /// <summary>
+        /// Gets or sets the validator.
+        /// </summary>
+        /// <value>
+        /// The validator.
+        /// </value>
+        public FilterDefinition<TDocument> Validator
+        {
+            get { return _validator; }
+            set { _validator = value; }
         }
     }
 }

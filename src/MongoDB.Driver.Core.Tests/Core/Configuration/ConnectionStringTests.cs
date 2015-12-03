@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ using NUnit.Framework;
 namespace MongoDB.Driver.Core.Configuration
 {
     [TestFixture]
+    [Category("ConnectionString")]
     public class ConnectionStringTests
     {
         [Test]
@@ -155,6 +156,7 @@ namespace MongoDB.Driver.Core.Configuration
             subject.MaxPoolSize.Should().Be(null);
             subject.MinPoolSize.Should().Be(null);
             subject.Password.Should().BeNull();
+            subject.ReadConcernLevel.Should().BeNull();
             subject.ReadPreference.Should().BeNull();
             subject.ReadPreferenceTags.Should().BeNull();
             subject.ReplicaSet.Should().BeNull();
@@ -187,6 +189,7 @@ namespace MongoDB.Driver.Core.Configuration
                 "maxLifeTime=5ms;" +
                 "maxPoolSize=20;" +
                 "minPoolSize=15;" +
+                "readConcernLevel=majority;" +
                 "readPreference=primary;" +
                 "readPreferenceTags=dc:1;" +
                 "replicaSet=funny;" +
@@ -218,8 +221,9 @@ namespace MongoDB.Driver.Core.Configuration
             subject.MaxPoolSize.Should().Be(20);
             subject.MinPoolSize.Should().Be(15);
             subject.Password.Should().Be("pass");
+            subject.ReadConcernLevel.Should().Be(ReadConcernLevel.Majority);
             subject.ReadPreference.Should().Be(ReadPreferenceMode.Primary);
-            subject.ReadPreferenceTags.Single().Should().Be(new TagSet(new [] { new Tag("dc", "1") }));
+            subject.ReadPreferenceTags.Single().Should().Be(new TagSet(new[] { new Tag("dc", "1") }));
             subject.ReplicaSet.Should().Be("funny");
             subject.LocalThreshold.Should().Be(TimeSpan.FromMilliseconds(50));
             subject.SocketTimeout.Should().Be(TimeSpan.FromMilliseconds(40));
@@ -410,6 +414,16 @@ namespace MongoDB.Driver.Core.Configuration
         }
 
         [Test]
+        [TestCase("mongodb://localhost?readConcernLevel=local", ReadConcernLevel.Local)]
+        [TestCase("mongodb://localhost?readConcernLevel=majority", ReadConcernLevel.Majority)]
+        public void When_readConcernLevel_is_specified(string connectionString, ReadConcernLevel readConcernLevel)
+        {
+            var subject = new ConnectionString(connectionString);
+
+            subject.ReadConcernLevel.Should().Be(readConcernLevel);
+        }
+
+        [Test]
         [TestCase("mongodb://localhost?readPreference=primary", ReadPreferenceMode.Primary)]
         [TestCase("mongodb://localhost?readPreference=primaryPreferred", ReadPreferenceMode.PrimaryPreferred)]
         [TestCase("mongodb://localhost?readPreference=secondaryPreferred", ReadPreferenceMode.SecondaryPreferred)]
@@ -427,7 +441,7 @@ namespace MongoDB.Driver.Core.Configuration
         {
             var subject = new ConnectionString("mongodb://localhost?readPreferenceTags=dc:east,rack:1");
 
-            var tagSet = new TagSet(new List<Tag> 
+            var tagSet = new TagSet(new List<Tag>
             {
                 new Tag("dc", "east"),
                 new Tag("rack", "1")
@@ -442,13 +456,13 @@ namespace MongoDB.Driver.Core.Configuration
         {
             var subject = new ConnectionString("mongodb://localhost?readPreferenceTags=dc:east,rack:1&readPreferenceTags=dc:west,rack:2");
 
-            var tagSet1 = new TagSet(new List<Tag> 
+            var tagSet1 = new TagSet(new List<Tag>
             {
                 new Tag("dc", "east"),
                 new Tag("rack", "1")
             });
 
-            var tagSet2 = new TagSet(new List<Tag> 
+            var tagSet2 = new TagSet(new List<Tag>
             {
                 new Tag("dc", "west"),
                 new Tag("rack", "2")
@@ -511,6 +525,20 @@ namespace MongoDB.Driver.Core.Configuration
             var subject = new ConnectionString(connectionString);
 
             subject.LocalThreshold.Should().Be(TimeSpan.FromMilliseconds(milliseconds));
+        }
+
+        [Test]
+        [TestCase("mongodb://localhost?serverSelectionTimeout=15ms", 15)]
+        [TestCase("mongodb://localhost?serverSelectionTimeoutMS=15", 15)]
+        [TestCase("mongodb://localhost?serverSelectionTimeout=15", 1000 * 15)]
+        [TestCase("mongodb://localhost?serverSelectionTimeout=15s", 1000 * 15)]
+        [TestCase("mongodb://localhost?serverSelectionTimeout=15m", 1000 * 60 * 15)]
+        [TestCase("mongodb://localhost?serverSelectionTimeout=15h", 1000 * 60 * 60 * 15)]
+        public void When_serverSelectionTimeout_is_specified(string connectionString, int milliseconds)
+        {
+            var subject = new ConnectionString(connectionString);
+
+            subject.ServerSelectionTimeout.Should().Be(TimeSpan.FromMilliseconds(milliseconds));
         }
 
         [Test]

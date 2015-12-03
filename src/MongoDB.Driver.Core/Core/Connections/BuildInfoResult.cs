@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -41,7 +41,7 @@ namespace MongoDB.Driver.Core.Connections
         /// <param name="wrapped">The wrapped result document.</param>
         public BuildInfoResult(BsonDocument wrapped)
         {
-            _wrapped = Ensure.IsNotNull(wrapped, "wrapped");
+            _wrapped = Ensure.IsNotNull(wrapped, nameof(wrapped));
         }
 
         // properties

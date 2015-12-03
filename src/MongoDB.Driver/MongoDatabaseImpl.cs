@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -16,10 +16,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using MongoDB.Bson;
 using MongoDB.Bson.IO;
+using MongoDB.Bson.Serialization;
 using MongoDB.Driver.Core.Bindings;
 using MongoDB.Driver.Core.Clusters;
 using MongoDB.Driver.Core.Misc;
@@ -30,22 +32,29 @@ namespace MongoDB.Driver
 {
     internal sealed class MongoDatabaseImpl : MongoDatabaseBase
     {
-        // fields
+        // private fields
+        private readonly IMongoClient _client;
         private readonly ICluster _cluster;
         private readonly DatabaseNamespace _databaseNamespace;
         private readonly IOperationExecutor _operationExecutor;
         private readonly MongoDatabaseSettings _settings;
 
         // constructors
-        public MongoDatabaseImpl(DatabaseNamespace databaseNamespace, MongoDatabaseSettings settings, ICluster cluster, IOperationExecutor operationExecutor)
+        public MongoDatabaseImpl(IMongoClient client, DatabaseNamespace databaseNamespace, MongoDatabaseSettings settings, ICluster cluster, IOperationExecutor operationExecutor)
         {
-            _databaseNamespace = Ensure.IsNotNull(databaseNamespace, "databaseNamespace");
-            _settings = Ensure.IsNotNull(settings, "settings").Freeze();
-            _cluster = Ensure.IsNotNull(cluster, "cluster");
-            _operationExecutor = Ensure.IsNotNull(operationExecutor, "operationExecutor");
+            _client = Ensure.IsNotNull(client, nameof(client));
+            _databaseNamespace = Ensure.IsNotNull(databaseNamespace, nameof(databaseNamespace));
+            _settings = Ensure.IsNotNull(settings, nameof(settings)).Freeze();
+            _cluster = Ensure.IsNotNull(cluster, nameof(cluster));
+            _operationExecutor = Ensure.IsNotNull(operationExecutor, nameof(operationExecutor));
         }
 
-        // properties
+        // public properties
+        public override IMongoClient Client
+        {
+            get { return _client; }
+        }
+
         public override DatabaseNamespace DatabaseNamespace
         {
             get { return _databaseNamespace; }
@@ -56,13 +65,151 @@ namespace MongoDB.Driver
             get { return _settings; }
         }
 
-        // methods
+        // public methods
+        public override void CreateCollection(string name, CreateCollectionOptions options, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNullOrEmpty(name, nameof(name));
+
+            if (options == null)
+            {
+                CreateCollectionHelper<BsonDocument>(name, null, cancellationToken);
+            }
+
+            if (options.GetType() == typeof(CreateCollectionOptions))
+            {
+                var genericOptions = CreateCollectionOptions<BsonDocument>.CoercedFrom(options);
+                CreateCollectionHelper<BsonDocument>(name, genericOptions, cancellationToken);
+            }
+
+            var genericMethodDefinition = typeof(MongoDatabaseImpl).GetMethod("CreateCollectionHelper", BindingFlags.NonPublic | BindingFlags.Instance);
+            var documentType = options.GetType().GetGenericArguments()[0];
+            var methodInfo = genericMethodDefinition.MakeGenericMethod(documentType);
+            methodInfo.Invoke(this, new object[] { name, options, cancellationToken });
+        }
+
         public override Task CreateCollectionAsync(string name, CreateCollectionOptions options, CancellationToken cancellationToken)
         {
-            Ensure.IsNotNullOrEmpty(name, "name");
+            Ensure.IsNotNullOrEmpty(name, nameof(name));
+
+            if (options == null)
+            {
+                return CreateCollectionHelperAsync<BsonDocument>(name, null, cancellationToken);
+            }
+
+            if (options.GetType() == typeof(CreateCollectionOptions))
+            {
+                var genericOptions = CreateCollectionOptions<BsonDocument>.CoercedFrom(options);
+                return CreateCollectionHelperAsync<BsonDocument>(name, genericOptions, cancellationToken);
+            }
+
+            var genericMethodDefinition = typeof(MongoDatabaseImpl).GetMethod("CreateCollectionHelperAsync", BindingFlags.NonPublic | BindingFlags.Instance);
+            var documentType = options.GetType().GetGenericArguments()[0];
+            var methodInfo = genericMethodDefinition.MakeGenericMethod(documentType);
+            return (Task)methodInfo.Invoke(this, new object[] { name, options, cancellationToken });
+        }
+
+        public override void DropCollection(string name, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNullOrEmpty(name, nameof(name));
+            var operation = CreateDropCollectionOperation(name);
+            ExecuteWriteOperation(operation, cancellationToken);
+        }
+
+        public override Task DropCollectionAsync(string name, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNullOrEmpty(name, nameof(name));
+            var operation = CreateDropCollectionOperation(name);
+            return ExecuteWriteOperationAsync(operation, cancellationToken);
+        }
+
+        public override IMongoCollection<TDocument> GetCollection<TDocument>(string name, MongoCollectionSettings settings)
+        {
+            Ensure.IsNotNullOrEmpty(name, nameof(name));
+
+            settings = settings == null ?
+                new MongoCollectionSettings() :
+                settings.Clone();
+
+            settings.ApplyDefaultValues(_settings);
+
+            return new MongoCollectionImpl<TDocument>(this, new CollectionNamespace(_databaseNamespace, name), settings, _cluster, _operationExecutor);
+        }
+
+        public override IAsyncCursor<BsonDocument> ListCollections(ListCollectionsOptions options, CancellationToken cancellationToken)
+        {
+            options = options ?? new ListCollectionsOptions();
+            var operation = CreateListCollectionsOperation(options);
+            return ExecuteReadOperation(operation, ReadPreference.Primary, cancellationToken);
+        }
+
+        public override Task<IAsyncCursor<BsonDocument>> ListCollectionsAsync(ListCollectionsOptions options, CancellationToken cancellationToken)
+        {
+            options = options ?? new ListCollectionsOptions();
+            var operation = CreateListCollectionsOperation(options);
+            return ExecuteReadOperationAsync(operation, ReadPreference.Primary, cancellationToken);
+        }
+
+        public override void RenameCollection(string oldName, string newName, RenameCollectionOptions options, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNullOrEmpty(oldName, nameof(oldName));
+            Ensure.IsNotNullOrEmpty(newName, nameof(newName));
+            options = options ?? new RenameCollectionOptions();
+
+            var operation = CreateRenameCollectionOperation(oldName, newName, options);
+            ExecuteWriteOperation(operation, cancellationToken);
+        }
+
+        public override Task RenameCollectionAsync(string oldName, string newName, RenameCollectionOptions options, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNullOrEmpty(oldName, nameof(oldName));
+            Ensure.IsNotNullOrEmpty(newName, nameof(newName));
+            options = options ?? new RenameCollectionOptions();
+
+            var operation = CreateRenameCollectionOperation(oldName, newName, options);
+            return ExecuteWriteOperationAsync(operation, cancellationToken);
+        }
+
+        public override TResult RunCommand<TResult>(Command<TResult> command, ReadPreference readPreference = null, CancellationToken cancellationToken = default(CancellationToken))
+        {
+            Ensure.IsNotNull(command, nameof(command));
+            readPreference = readPreference ?? ReadPreference.Primary;
+
+            var operation = CreateRunCommandOperation(command);
+            return ExecuteReadOperation(operation, readPreference, cancellationToken);
+        }
+
+        public override Task<TResult> RunCommandAsync<TResult>(Command<TResult> command, ReadPreference readPreference = null, CancellationToken cancellationToken = default(CancellationToken))
+        {
+            Ensure.IsNotNull(command, nameof(command));
+            readPreference = readPreference ?? ReadPreference.Primary;
+
+            var operation = CreateRunCommandOperation(command);
+            return ExecuteReadOperationAsync(operation, readPreference, cancellationToken);
+        }
+
+        // private methods
+        private void CreateCollectionHelper<TDocument>(string name, CreateCollectionOptions<TDocument> options, CancellationToken cancellationToken)
+        {
+            options = options ?? new CreateCollectionOptions<TDocument>();
+
+            var operation = CreateCreateCollectionOperation(name, options);
+            ExecuteWriteOperation(operation, cancellationToken);
+        }
+
+        private Task CreateCollectionHelperAsync<TDocument>(string name, CreateCollectionOptions<TDocument> options, CancellationToken cancellationToken)
+        {
+            options = options ?? new CreateCollectionOptions<TDocument>();
+
+            var operation = CreateCreateCollectionOperation(name, options);
+            return ExecuteWriteOperationAsync(operation, cancellationToken);
+        }
+
+        private CreateCollectionOperation CreateCreateCollectionOperation(string name, CreateCollectionOptions options)
+        {
             options = options ?? new CreateCollectionOptions();
             var messageEncoderSettings = GetMessageEncoderSettings();
-            var operation = new CreateCollectionOperation(new CollectionNamespace(_databaseNamespace, name), messageEncoderSettings)
+
+            return new CreateCollectionOperation(new CollectionNamespace(_databaseNamespace, name), messageEncoderSettings)
             {
                 AutoIndexId = options.AutoIndexId,
                 Capped = options.Capped,
@@ -71,95 +218,98 @@ namespace MongoDB.Driver
                 StorageEngine = options.StorageEngine,
                 UsePowerOf2Sizes = options.UsePowerOf2Sizes
             };
-
-            return ExecuteWriteOperation(operation, cancellationToken);
         }
 
-        public override Task DropCollectionAsync(string name, CancellationToken cancellationToken)
+        private CreateCollectionOperation CreateCreateCollectionOperation<TDocument>(string name, CreateCollectionOptions<TDocument> options)
         {
             var messageEncoderSettings = GetMessageEncoderSettings();
-            var operation = new DropCollectionOperation(new CollectionNamespace(_databaseNamespace, name), messageEncoderSettings);
-            return ExecuteWriteOperation(operation, cancellationToken);
-        }
-
-        public override IMongoCollection<TDocument> GetCollection<TDocument>(string name, MongoCollectionSettings settings)
-        {
-            Ensure.IsNotNullOrEmpty(name, "name");
-
-            settings = settings == null ?
-                new MongoCollectionSettings() :
-                settings.Clone();
-
-            settings.ApplyDefaultValues(_settings);
-
-            return new MongoCollectionImpl<TDocument>(new CollectionNamespace(_databaseNamespace, name), settings, _cluster, _operationExecutor);
-        }
-
-        public override Task<IAsyncCursor<BsonDocument>> ListCollectionsAsync(ListCollectionsOptions options, CancellationToken cancellationToken)
-        {
-            var messageEncoderSettings = GetMessageEncoderSettings();
-            var operation = new ListCollectionsOperation(_databaseNamespace, messageEncoderSettings)
+            BsonDocument validator = null;
+            if (options.Validator != null)
             {
-                Filter = options == null ? null : options.Filter.Render(_settings.SerializerRegistry.GetSerializer<BsonDocument>(), _settings.SerializerRegistry)
+                var serializerRegistry = options.SerializerRegistry ?? BsonSerializer.SerializerRegistry;
+                var documentSerializer = options.DocumentSerializer ?? serializerRegistry.GetSerializer<TDocument>();
+                validator = options.Validator.Render(documentSerializer, serializerRegistry);
+            }
+
+            return new CreateCollectionOperation(new CollectionNamespace(_databaseNamespace, name), messageEncoderSettings)
+            {
+                AutoIndexId = options.AutoIndexId,
+                Capped = options.Capped,
+                IndexOptionDefaults = options.IndexOptionDefaults?.ToBsonDocument(),
+                MaxDocuments = options.MaxDocuments,
+                MaxSize = options.MaxSize,
+                StorageEngine = options.StorageEngine,
+                UsePowerOf2Sizes = options.UsePowerOf2Sizes,
+                ValidationAction = options.ValidationAction,
+                ValidationLevel = options.ValidationLevel,
+                Validator = validator
             };
-            return ExecuteReadOperation(operation, ReadPreference.Primary, cancellationToken);
         }
 
-        public override Task RenameCollectionAsync(string oldName, string newName, RenameCollectionOptions options, CancellationToken cancellationToken)
+        private DropCollectionOperation CreateDropCollectionOperation(string name)
         {
-            Ensure.IsNotNullOrEmpty(oldName, "oldName");
-            Ensure.IsNotNullOrEmpty(newName, "newName");
-
+            var collectionNamespace = new CollectionNamespace(_databaseNamespace, name);
             var messageEncoderSettings = GetMessageEncoderSettings();
-            var operation = new RenameCollectionOperation(
+            return new DropCollectionOperation(collectionNamespace, messageEncoderSettings);
+        }
+
+        private ListCollectionsOperation CreateListCollectionsOperation(ListCollectionsOptions options)
+        {
+            var messageEncoderSettings = GetMessageEncoderSettings();
+            return new ListCollectionsOperation(_databaseNamespace, messageEncoderSettings)
+            {
+                Filter = options.Filter?.Render(_settings.SerializerRegistry.GetSerializer<BsonDocument>(), _settings.SerializerRegistry)
+            };
+        }
+
+        private RenameCollectionOperation CreateRenameCollectionOperation(string oldName, string newName, RenameCollectionOptions options)
+        {
+            var messageEncoderSettings = GetMessageEncoderSettings();
+            return new RenameCollectionOperation(
                 new CollectionNamespace(_databaseNamespace, oldName),
                 new CollectionNamespace(_databaseNamespace, newName),
                 messageEncoderSettings)
             {
-                DropTarget = options == null ? null : options.DropTarget
+                DropTarget = options.DropTarget
             };
-
-            return ExecuteWriteOperation(operation, cancellationToken);
         }
 
-        public override Task<TResult> RunCommandAsync<TResult>(Command<TResult> command, ReadPreference readPreference = null, CancellationToken cancellationToken = default(CancellationToken))
+        private ReadCommandOperation<TResult> CreateRunCommandOperation<TResult>(Command<TResult> command)
         {
-            Ensure.IsNotNull(command, "command");
-            readPreference = readPreference ?? ReadPreference.Primary;
-
             var renderedCommand = command.Render(_settings.SerializerRegistry);
             var messageEncoderSettings = GetMessageEncoderSettings();
-
-            if (readPreference == ReadPreference.Primary)
-            {
-                var operation = new WriteCommandOperation<TResult>(_databaseNamespace, renderedCommand.Document, renderedCommand.ResultSerializer, messageEncoderSettings);
-                return ExecuteWriteOperation<TResult>(operation, cancellationToken);
-            }
-            else
-            {
-                var operation = new ReadCommandOperation<TResult>(_databaseNamespace, renderedCommand.Document, renderedCommand.ResultSerializer, messageEncoderSettings);
-                return ExecuteReadOperation<TResult>(operation, readPreference, cancellationToken);
-            }
+            return new ReadCommandOperation<TResult>(_databaseNamespace, renderedCommand.Document, renderedCommand.ResultSerializer, messageEncoderSettings);
         }
 
-        private Task<T> ExecuteReadOperation<T>(IReadOperation<T> operation, CancellationToken cancellationToken)
-        {
-            return ExecuteReadOperation(operation, _settings.ReadPreference, cancellationToken);
-        }
-
-        private async Task<T> ExecuteReadOperation<T>(IReadOperation<T> operation, ReadPreference readPreference, CancellationToken cancellationToken)
+        private T ExecuteReadOperation<T>(IReadOperation<T> operation, ReadPreference readPreference, CancellationToken cancellationToken)
         {
             using (var binding = new ReadPreferenceBinding(_cluster, readPreference))
             {
-                return await _operationExecutor.ExecuteReadOperationAsync(binding, operation, _settings.OperationTimeout, cancellationToken).ConfigureAwait(false);
+                return _operationExecutor.ExecuteReadOperation(binding, operation, cancellationToken);
             }
         }
 
-        private async Task<T> ExecuteWriteOperation<T>(IWriteOperation<T> operation, CancellationToken cancellationToken)
+        private async Task<T> ExecuteReadOperationAsync<T>(IReadOperation<T> operation, ReadPreference readPreference, CancellationToken cancellationToken)
+        {
+            using (var binding = new ReadPreferenceBinding(_cluster, readPreference))
+            {
+                return await _operationExecutor.ExecuteReadOperationAsync(binding, operation, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        private T ExecuteWriteOperation<T>(IWriteOperation<T> operation, CancellationToken cancellationToken)
         {
             using (var binding = new WritableServerBinding(_cluster))
             {
-                return await _operationExecutor.ExecuteWriteOperationAsync(binding, operation, _settings.OperationTimeout, cancellationToken).ConfigureAwait(false);
+                return _operationExecutor.ExecuteWriteOperation(binding, operation, cancellationToken);
+            }
+        }
+
+        private async Task<T> ExecuteWriteOperationAsync<T>(IWriteOperation<T> operation, CancellationToken cancellationToken)
+        {
+            using (var binding = new WritableServerBinding(_cluster))
+            {
+                return await _operationExecutor.ExecuteWriteOperationAsync(binding, operation, cancellationToken).ConfigureAwait(false);
             }
         }
 

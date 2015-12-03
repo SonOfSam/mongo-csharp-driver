@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ using System.Threading.Tasks;
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Serializers;
 using MongoDB.Driver.Core.Bindings;
+using MongoDB.Driver.Core.Events;
 using MongoDB.Driver.Core.Misc;
 using MongoDB.Driver.Core.WireProtocol.Messages.Encoders;
 
@@ -31,11 +32,6 @@ namespace MongoDB.Driver.Core.Operations
     /// </summary>
     public class ListCollectionsOperation : IReadOperation<IAsyncCursor<BsonDocument>>
     {
-        #region static
-        // static fields
-        private static readonly SemanticVersion __versionSupportingListCollectionsCommand = new SemanticVersion(2, 7, 6);
-        #endregion
-
         // fields
         private BsonDocument _filter;
         private readonly DatabaseNamespace _databaseNamespace;
@@ -51,8 +47,8 @@ namespace MongoDB.Driver.Core.Operations
             DatabaseNamespace databaseNamespace,
             MessageEncoderSettings messageEncoderSettings)
         {
-            _databaseNamespace = Ensure.IsNotNull(databaseNamespace, "databaseNamespace");
-            _messageEncoderSettings = Ensure.IsNotNull(messageEncoderSettings, "messageEncoderSettings");
+            _databaseNamespace = Ensure.IsNotNull(databaseNamespace, nameof(databaseNamespace));
+            _messageEncoderSettings = Ensure.IsNotNull(messageEncoderSettings, nameof(messageEncoderSettings));
         }
 
         // properties
@@ -90,88 +86,47 @@ namespace MongoDB.Driver.Core.Operations
             get { return _messageEncoderSettings; }
         }
 
-        // methods
+        // public methods
+        /// <inheritdoc/>
+        public IAsyncCursor<BsonDocument> Execute(IReadBinding binding, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNull(binding, nameof(binding));
+
+            using (EventContext.BeginOperation())
+            using (var channelSource = binding.GetReadChannelSource(cancellationToken))
+            using (var channel = channelSource.GetChannel(cancellationToken))
+            using (var channelBinding = new ChannelReadBinding(channelSource.Server, channel, binding.ReadPreference))
+            {
+                var operation = CreateOperation(channel);
+                return operation.Execute(channelBinding, cancellationToken);
+            }
+        }
+
         /// <inheritdoc/>
         public async Task<IAsyncCursor<BsonDocument>> ExecuteAsync(IReadBinding binding, CancellationToken cancellationToken)
         {
-            Ensure.IsNotNull(binding, "binding");
+            Ensure.IsNotNull(binding, nameof(binding));
 
+            using (EventContext.BeginOperation())
             using (var channelSource = await binding.GetReadChannelSourceAsync(cancellationToken).ConfigureAwait(false))
+            using (var channel = await channelSource.GetChannelAsync(cancellationToken).ConfigureAwait(false))
+            using (var channelBinding = new ChannelReadBinding(channelSource.Server, channel, binding.ReadPreference))
             {
-                if (channelSource.ServerDescription.Version >= __versionSupportingListCollectionsCommand)
-                {
-                    return await ExecuteUsingCommandAsync(channelSource, binding.ReadPreference, cancellationToken).ConfigureAwait(false);
-                }
-                else
-                {
-                    return await ExecuteUsingQueryAsync(channelSource, binding.ReadPreference, cancellationToken).ConfigureAwait(false);
-                }
+                var operation = CreateOperation(channel);
+                return await operation.ExecuteAsync(channelBinding, cancellationToken).ConfigureAwait(false);
             }
         }
 
-        private async Task<IAsyncCursor<BsonDocument>> ExecuteUsingCommandAsync(IChannelSourceHandle channelSource, ReadPreference readPreference, CancellationToken cancellationToken)
+        // private methods
+        private IReadOperation<IAsyncCursor<BsonDocument>> CreateOperation(IChannel channel)
         {
-            var command = new BsonDocument
+            if (SupportedFeatures.IsListCollectionsCommandSupported(channel.ConnectionDescription.ServerVersion))
             {
-                { "listCollections", 1 },
-                { "filter", _filter, _filter != null }
-            };
-            var operation = new ReadCommandOperation<BsonDocument>(_databaseNamespace, command, BsonDocumentSerializer.Instance, _messageEncoderSettings);
-            var response = await operation.ExecuteAsync(channelSource, readPreference, cancellationToken).ConfigureAwait(false);
-            var cursorDocument = response["cursor"].AsBsonDocument;
-            var cursor = new AsyncCursor<BsonDocument>(
-                channelSource.Fork(),
-                CollectionNamespace.FromFullName(cursorDocument["ns"].AsString),
-                command,
-                cursorDocument["firstBatch"].AsBsonArray.OfType<BsonDocument>().ToList(),
-                cursorDocument["id"].ToInt64(),
-                0,
-                0,
-                BsonDocumentSerializer.Instance,
-                _messageEncoderSettings);
-
-            return cursor;
-        }
-
-        private async Task<IAsyncCursor<BsonDocument>> ExecuteUsingQueryAsync(IChannelSourceHandle channelSource, ReadPreference readPreference, CancellationToken cancellationToken)
-        {
-            // if the filter includes a comparison to the "name" we must convert the value to a full namespace
-            var filter = _filter;
-            if (filter != null && filter.Contains("name"))
-            {
-                var value = filter["name"];
-                if (!value.IsString)
-                {
-                    throw new NotSupportedException("Name filter must be a plain string when connected to a server version less than 2.8.");
-                }
-                filter = (BsonDocument)filter.Clone(); // shallow clone
-                filter["name"] = _databaseNamespace.DatabaseName + "." + value;
+                return new ListCollectionsUsingCommandOperation(_databaseNamespace, _messageEncoderSettings) { Filter = _filter };
             }
-
-            var operation = new FindOperation<BsonDocument>(_databaseNamespace.SystemNamespacesCollection, BsonDocumentSerializer.Instance, _messageEncoderSettings)
+            else
             {
-                Filter = filter
-            };
-            var cursor = await operation.ExecuteAsync(channelSource, readPreference, cancellationToken).ConfigureAwait(false);
-
-            return new BatchTransformingAsyncCursor<BsonDocument, BsonDocument>(cursor, NormalizeQueryResponse);
-        }
-
-        private IEnumerable<BsonDocument> NormalizeQueryResponse(IEnumerable<BsonDocument> collections)
-        {
-            var prefix = _databaseNamespace + ".";
-            foreach (var collection in collections)
-            {
-                var name = (string)collection["name"];
-                if (name.StartsWith(prefix))
-                {
-                    var collectionName = name.Substring(prefix.Length);
-                    if (!collectionName.Contains('$'))
-                    {
-                        collection["name"] = collectionName; // replace the full namespace with just the collection name
-                        yield return collection;
-                    }
-                }
+                return new ListCollectionsUsingQueryOperation(_databaseNamespace, _messageEncoderSettings) { Filter = _filter }; ;
             }
         }
     }

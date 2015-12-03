@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -39,8 +39,8 @@ namespace MongoDB.Driver.Core.Bindings
         /// <param name="writeBinding">The write binding.</param>
         public SplitReadWriteBinding(IReadBinding readBinding, IWriteBinding writeBinding)
         {
-            _readBinding = Ensure.IsNotNull(readBinding, "readBinding");
-            _writeBinding = Ensure.IsNotNull(writeBinding, "writeBinding");
+            _readBinding = Ensure.IsNotNull(readBinding, nameof(readBinding));
+            _writeBinding = Ensure.IsNotNull(writeBinding, nameof(writeBinding));
         }
 
         /// <summary>
@@ -62,10 +62,24 @@ namespace MongoDB.Driver.Core.Bindings
 
         // methods
         /// <inheritdoc/>
+        public IChannelSourceHandle GetReadChannelSource(CancellationToken cancellationToken)
+        {
+            ThrowIfDisposed();
+            return _readBinding.GetReadChannelSource(cancellationToken);
+        }
+
+        /// <inheritdoc/>
         public Task<IChannelSourceHandle> GetReadChannelSourceAsync(CancellationToken cancellationToken)
         {
             ThrowIfDisposed();
             return _readBinding.GetReadChannelSourceAsync(cancellationToken);
+        }
+
+        /// <inheritdoc/>
+        public IChannelSourceHandle GetWriteChannelSource(CancellationToken cancellationToken)
+        {
+            ThrowIfDisposed();
+            return _writeBinding.GetWriteChannelSource(cancellationToken);
         }
 
         /// <inheritdoc/>

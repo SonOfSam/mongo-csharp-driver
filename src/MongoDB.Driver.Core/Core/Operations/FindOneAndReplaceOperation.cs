@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -35,6 +35,7 @@ namespace MongoDB.Driver.Core.Operations
     public class FindOneAndReplaceOperation<TResult> : FindAndModifyOperationBase<TResult>
     {
         // fields
+        private bool? _bypassDocumentValidation;
         private readonly BsonDocument _filter;
         private bool _isUpsert;
         private TimeSpan? _maxTime;
@@ -55,12 +56,24 @@ namespace MongoDB.Driver.Core.Operations
         public FindOneAndReplaceOperation(CollectionNamespace collectionNamespace, BsonDocument filter, BsonDocument replacement, IBsonSerializer<TResult> resultSerializer, MessageEncoderSettings messageEncoderSettings)
             : base(collectionNamespace, resultSerializer, messageEncoderSettings)
         {
-            _filter = Ensure.IsNotNull(filter, "filter");
-            _replacement = Ensure.IsNotNull(replacement, "replacement");
+            _filter = Ensure.IsNotNull(filter, nameof(filter));
+            _replacement = Ensure.IsNotNull(replacement, nameof(replacement));
             _returnDocument = ReturnDocument.Before;
         }
 
         // properties
+        /// <summary>
+        /// Gets or sets a value indicating whether to bypass document validation.
+        /// </summary>
+        /// <value>
+        /// A value indicating whether to bypass document validation.
+        /// </value>
+        public bool? BypassDocumentValidation
+        {
+            get { return _bypassDocumentValidation; }
+            set { _bypassDocumentValidation = value; }
+        }
+
         /// <summary>
         /// Gets the filter.
         /// </summary>
@@ -144,7 +157,7 @@ namespace MongoDB.Driver.Core.Operations
         }
 
         // methods
-        internal override BsonDocument CreateCommand()
+        internal override BsonDocument CreateCommand(SemanticVersion serverVersion)
         {
             return new BsonDocument
             {
@@ -155,7 +168,9 @@ namespace MongoDB.Driver.Core.Operations
                 { "new", _returnDocument == ReturnDocument.After },
                 { "fields", _projection, _projection != null },
                 { "upsert", _isUpsert },
-                { "maxTimeMS", () => _maxTime.Value.TotalMilliseconds, _maxTime.HasValue }
+                { "maxTimeMS", () => _maxTime.Value.TotalMilliseconds, _maxTime.HasValue },
+                { "writeConcern", () => WriteConcern.ToBsonDocument(), WriteConcern != null && !WriteConcern.IsServerDefault && SupportedFeatures.IsFindAndModifyWriteConcernSupported(serverVersion) },
+                { "bypassDocumentValidation", () => _bypassDocumentValidation.Value, _bypassDocumentValidation.HasValue && SupportedFeatures.IsBypassDocumentValidationSupported(serverVersion) }
             };
         }
 

@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -39,8 +39,8 @@ namespace MongoDB.Driver.Core.Bindings
         /// <param name="readPreference">The read preference.</param>
         public ChannelSourceReadWriteBinding(IChannelSourceHandle channelSource, ReadPreference readPreference)
         {
-            _channelSource = Ensure.IsNotNull(channelSource, "channelSource");
-            _readPreference = Ensure.IsNotNull(readPreference, "readPreference");
+            _channelSource = Ensure.IsNotNull(channelSource, nameof(channelSource));
+            _readPreference = Ensure.IsNotNull(readPreference, nameof(readPreference));
         }
 
         // properties
@@ -52,17 +52,31 @@ namespace MongoDB.Driver.Core.Bindings
 
         // methods
         /// <inheritdoc/>
+        public IChannelSourceHandle GetReadChannelSource(CancellationToken cancellationToken)
+        {
+            ThrowIfDisposed();
+            return GetChannelSourceHelper();
+        }
+
+        /// <inheritdoc/>
         public Task<IChannelSourceHandle> GetReadChannelSourceAsync(CancellationToken cancellationToken)
         {
             ThrowIfDisposed();
-            return Task.FromResult(_channelSource.Fork());
+            return Task.FromResult(GetChannelSourceHelper());
+        }
+
+        /// <inheritdoc/>
+        public IChannelSourceHandle GetWriteChannelSource(CancellationToken cancellationToken)
+        {
+            ThrowIfDisposed();
+            return GetChannelSourceHelper();
         }
 
         /// <inheritdoc/>
         public Task<IChannelSourceHandle> GetWriteChannelSourceAsync(CancellationToken cancellationToken)
         {
             ThrowIfDisposed();
-            return Task.FromResult(_channelSource.Fork());
+            return Task.FromResult(GetChannelSourceHelper());
         }
 
         /// <inheritdoc/>
@@ -76,9 +90,14 @@ namespace MongoDB.Driver.Core.Bindings
             }
         }
 
+        private IChannelSourceHandle GetChannelSourceHelper()
+        {
+            return _channelSource.Fork();
+        }
+
         private void ThrowIfDisposed()
         {
-            if(_disposed)
+            if (_disposed)
             {
                 throw new ObjectDisposedException(GetType().Name);
             }

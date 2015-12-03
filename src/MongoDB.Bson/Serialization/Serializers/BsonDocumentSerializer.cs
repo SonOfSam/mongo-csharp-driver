@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -113,21 +113,6 @@ namespace MongoDB.Bson.Serialization.Serializers
         }
 
         /// <summary>
-        /// Gets the serialization info for a member.
-        /// </summary>
-        /// <param name="memberName">The member name.</param>
-        /// <returns>
-        /// The serialization info for the member.
-        /// </returns>
-        public BsonSerializationInfo GetMemberSerializationInfo(string memberName)
-        {
-            return new BsonSerializationInfo(
-                memberName,
-                BsonValueSerializer.Instance,
-                typeof(BsonValue));
-        }
-
-        /// <summary>
         /// Tries to get the serialization info for a member.
         /// </summary>
         /// <param name="memberName">Name of the member.</param>
@@ -137,7 +122,10 @@ namespace MongoDB.Bson.Serialization.Serializers
         /// </returns>
         public bool TryGetMemberSerializationInfo(string memberName, out BsonSerializationInfo serializationInfo)
         {
-            serializationInfo = GetMemberSerializationInfo(memberName);
+            serializationInfo = new BsonSerializationInfo(
+                memberName,
+                BsonValueSerializer.Instance,
+                typeof(BsonValue));
             return true;
         }
 

@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -32,13 +32,10 @@ namespace MongoDB.Driver.Tests
         // static constructor
         static LegacyTestConfiguration()
         {
-            var connectionString = CoreTestConfiguration.ConnectionString.ToString();
-            var mongoUrl = new MongoUrl(connectionString);
-
 #pragma warning disable 618
             __server = DriverTestConfiguration.Client.GetServer();
 #pragma warning restore
-            __database = __server.GetDatabase(mongoUrl.DatabaseName ?? CoreTestConfiguration.DatabaseNamespace.DatabaseName);
+            __database = __server.GetDatabase(CoreTestConfiguration.DatabaseNamespace.DatabaseName);
             __collection = __database.GetCollection("testcollection");
 
             // connect early so BuildInfo will be populated

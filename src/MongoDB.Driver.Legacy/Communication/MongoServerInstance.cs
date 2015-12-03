@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -80,7 +80,6 @@ namespace MongoDB.Driver
                 switch (serverDescription.Type)
                 {
                     case ServerType.ReplicaSetArbiter:
-                    case ServerType.ReplicaSetPassive:
                     case ServerType.ReplicaSetPrimary:
                     case ServerType.ReplicaSetSecondary:
                     case ServerType.ReplicaSetOther:
@@ -133,12 +132,12 @@ namespace MongoDB.Driver
         /// <summary>
         /// Gets a value indicating whether this server instance is a passive instance.
         /// </summary>
+        [Obsolete("Passives are treated the same as secondaries.")]
         public bool IsPassive
         {
             get
             {
-                var serverDescription = GetServerDescription();
-                return serverDescription.Type == ServerType.ReplicaSetPassive;
+                return false;
             }
         }
 
@@ -292,10 +291,9 @@ namespace MongoDB.Driver
             var operation = new PingOperation(messageEncoderSettings);
 
             var server = GetServer();
-            using (var channelSource = new ChannelSourceHandle(new ServerChannelSource(server)))
-            using (var channelSourceBinding = new ChannelSourceReadWriteBinding(channelSource, ReadPreference.PrimaryPreferred))
+            using (var binding = new SingleServerReadBinding(server, ReadPreference.PrimaryPreferred))
             {
-                operation.Execute(channelSourceBinding, CancellationToken.None);
+                operation.Execute(binding, CancellationToken.None);
             }
         }
 

@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
 using MongoDB.Bson;
+using MongoDB.Bson.Serialization;
 using MongoDB.Bson.Serialization.Attributes;
 using MongoDB.Driver.Core.Bindings;
 using MongoDB.Driver.Core.Clusters;
@@ -41,10 +42,17 @@ namespace MongoDB.Driver
             settings.ApplyDefaultValues(new MongoClientSettings());
             _operationExecutor = new MockOperationExecutor();
             _subject = new MongoDatabaseImpl(
+                Substitute.For<IMongoClient>(),
                 new DatabaseNamespace("foo"),
                 settings,
                 Substitute.For<ICluster>(),
                 _operationExecutor);
+        }
+
+        [Test]
+        public void Client_should_be_set()
+        {
+            _subject.Client.Should().NotBeNull();
         }
 
         [Test]
@@ -60,19 +68,32 @@ namespace MongoDB.Driver
         }
 
         [Test]
-        public async Task CreateCollectionAsync_should_execute_the_CreateCollectionOperation()
+        public void CreateCollection_should_execute_the_CreateCollectionOperation(
+            [Values(false, true)] bool async)
         {
             var storageEngine = new BsonDocument("awesome", true);
-            var options = new CreateCollectionOptions
+            var options = new CreateCollectionOptions<BsonDocument>
             {
                 AutoIndexId = false,
                 Capped = true,
+                IndexOptionDefaults = new IndexOptionDefaults {  StorageEngine = new BsonDocument("x", 1) },
                 MaxDocuments = 10,
                 MaxSize = 11,
                 StorageEngine = storageEngine,
-                UsePowerOf2Sizes = false
+                UsePowerOf2Sizes = false,
+                ValidationAction = DocumentValidationAction.Warn,
+                ValidationLevel = DocumentValidationLevel.Off,
+                Validator = new BsonDocument("x", 1)
             };
-            await _subject.CreateCollectionAsync("bar", options, CancellationToken.None);
+
+            if (async)
+            {
+                _subject.CreateCollectionAsync("bar", options, CancellationToken.None).GetAwaiter().GetResult();
+            }
+            else
+            {
+                _subject.CreateCollection("bar", options, CancellationToken.None);
+            }
 
             var call = _operationExecutor.GetWriteCall<BsonDocument>();
 
@@ -81,16 +102,31 @@ namespace MongoDB.Driver
             op.CollectionNamespace.Should().Be(new CollectionNamespace(new DatabaseNamespace("foo"), "bar"));
             op.AutoIndexId.Should().Be(options.AutoIndexId);
             op.Capped.Should().Be(options.Capped);
+            op.IndexOptionDefaults.ToBsonDocument().Should().Be(options.IndexOptionDefaults.ToBsonDocument());
             op.MaxDocuments.Should().Be(options.MaxDocuments);
             op.MaxSize.Should().Be(options.MaxSize);
             op.StorageEngine.Should().Be(storageEngine);
             op.UsePowerOf2Sizes.Should().Be(options.UsePowerOf2Sizes);
+            op.ValidationAction.Should().Be(options.ValidationAction);
+            op.ValidationLevel.Should().Be(options.ValidationLevel);
+            var serializerRegistry = options.SerializerRegistry ?? BsonSerializer.SerializerRegistry;
+            var documentSerializer = options.DocumentSerializer ?? serializerRegistry.GetSerializer<BsonDocument>();
+            var renderedValidator = options.Validator.Render(documentSerializer, serializerRegistry);
+            op.Validator.Should().Be(renderedValidator);
         }
 
         [Test]
-        public async Task DropCollectionAsync_should_execute_the_DropCollectionOperation()
+        public void DropCollection_should_execute_the_DropCollectionOperation(
+            [Values(false, true)] bool async)
         {
-            await _subject.DropCollectionAsync("bar", CancellationToken.None);
+            if (async)
+            {
+                _subject.DropCollectionAsync("bar", CancellationToken.None).GetAwaiter().GetResult();
+            }
+            else
+            {
+                _subject.DropCollection("bar", CancellationToken.None);
+            }
 
             var call = _operationExecutor.GetWriteCall<BsonDocument>();
 
@@ -100,13 +136,21 @@ namespace MongoDB.Driver
         }
 
         [Test]
-        public async Task ListCollections_should_execute_the_ListCollectionsOperation()
+        public void ListCollections_should_execute_the_ListCollectionsOperation(
+            [Values(false, true)] bool async)
         {
             var result = Substitute.For<IAsyncCursor<BsonDocument>>();
             _operationExecutor.EnqueueResult<IAsyncCursor<BsonDocument>>(result);
             var filter = new BsonDocument("name", "awesome");
 
-            await _subject.ListCollectionsAsync(new ListCollectionsOptions { Filter = filter }, CancellationToken.None);
+            if (async)
+            {
+                _subject.ListCollectionsAsync(new ListCollectionsOptions { Filter = filter }, CancellationToken.None).GetAwaiter().GetResult();
+            }
+            else
+            {
+                _subject.ListCollections(new ListCollectionsOptions { Filter = filter }, CancellationToken.None);
+            }
 
             var call = _operationExecutor.GetReadCall<IAsyncCursor<BsonDocument>>();
             call.Operation.Should().BeOfType<ListCollectionsOperation>();
@@ -116,13 +160,22 @@ namespace MongoDB.Driver
         }
 
         [Test]
-        public async Task RenameCollectionAsync_should_execute_the_RenameCollectionOperation()
+        public void RenameCollection_should_execute_the_RenameCollectionOperation(
+            [Values(false, true)] bool async)
         {
             var options = new RenameCollectionOptions
             {
                 DropTarget = false,
             };
-            await _subject.RenameCollectionAsync("bar", "baz", options, CancellationToken.None);
+
+            if (async)
+            {
+                _subject.RenameCollectionAsync("bar", "baz", options, CancellationToken.None).GetAwaiter().GetResult();
+            }
+            else
+            {
+                _subject.RenameCollection("bar", "baz", options, CancellationToken.None);
+            }
 
             var call = _operationExecutor.GetWriteCall<BsonDocument>();
 
@@ -134,26 +187,46 @@ namespace MongoDB.Driver
         }
 
         [Test]
-        public async Task RunCommand_should_default_to_ReadPreference_primary()
+        public void RunCommand_should_default_to_ReadPreference_primary(
+            [Values(false, true)] bool async)
         {
             var cmd = new BsonDocument("count", "foo");
-            await _subject.RunCommandAsync<BsonDocument>(cmd);
 
-            var call = _operationExecutor.GetWriteCall<BsonDocument>();
+            if (async)
+            {
+                _subject.RunCommandAsync<BsonDocument>(cmd).GetAwaiter().GetResult();
+            }
+            else
+            {
+                _subject.RunCommand<BsonDocument>(cmd);
+            }
 
-            call.Binding.Should().BeOfType<WritableServerBinding>();
+            var call = _operationExecutor.GetReadCall<BsonDocument>();
 
-            call.Operation.Should().BeOfType<WriteCommandOperation<BsonDocument>>();
-            var op = (WriteCommandOperation<BsonDocument>)call.Operation;
+            call.Binding.Should().BeOfType<ReadPreferenceBinding>();
+            var binding = (ReadPreferenceBinding)call.Binding;
+            binding.ReadPreference.Should().Be(ReadPreference.Primary);
+
+            call.Operation.Should().BeOfType<ReadCommandOperation<BsonDocument>>();
+            var op = (ReadCommandOperation<BsonDocument>)call.Operation;
             op.DatabaseNamespace.DatabaseName.Should().Be("foo");
             op.Command.Should().Be("{count: \"foo\"}");
         }
 
         [Test]
-        public async Task RunCommand_should_use_the_provided_ReadPreference()
+        public void RunCommand_should_use_the_provided_ReadPreference(
+            [Values(false, true)] bool async)
         {
             var cmd = new BsonDocument("count", "foo");
-            await _subject.RunCommandAsync<BsonDocument>(cmd, ReadPreference.Secondary, CancellationToken.None);
+
+            if (async)
+            {
+                _subject.RunCommandAsync<BsonDocument>(cmd, ReadPreference.Secondary, CancellationToken.None).GetAwaiter().GetResult();
+            }
+            else
+            {
+                _subject.RunCommand<BsonDocument>(cmd, ReadPreference.Secondary, CancellationToken.None);
+            }
 
             var call = _operationExecutor.GetReadCall<BsonDocument>();
 
@@ -168,42 +241,80 @@ namespace MongoDB.Driver
         }
 
         [Test]
-        public async Task RunCommand_should_run_a_non_read_command()
+        public void RunCommand_should_run_a_non_read_command(
+            [Values(false, true)] bool async)
         {
             var cmd = new BsonDocument("shutdown", 1);
-            await _subject.RunCommandAsync<BsonDocument>(cmd);
 
-            var call = _operationExecutor.GetWriteCall<BsonDocument>();
+            if (async)
+            {
+                _subject.RunCommandAsync<BsonDocument>(cmd).GetAwaiter().GetResult();
+            }
+            else
+            {
+                _subject.RunCommand<BsonDocument>(cmd);
+            }
 
-            call.Operation.Should().BeOfType<WriteCommandOperation<BsonDocument>>();
-            var op = (WriteCommandOperation<BsonDocument>)call.Operation;
+            var call = _operationExecutor.GetReadCall<BsonDocument>();
+
+            call.Binding.Should().BeOfType<ReadPreferenceBinding>();
+            var binding = (ReadPreferenceBinding)call.Binding;
+            binding.ReadPreference.Should().Be(ReadPreference.Primary);
+
+            call.Operation.Should().BeOfType<ReadCommandOperation<BsonDocument>>();
+            var op = (ReadCommandOperation<BsonDocument>)call.Operation;
             op.DatabaseNamespace.DatabaseName.Should().Be("foo");
             op.Command.Should().Be(cmd);
         }
 
         [Test]
-        public async Task RunCommand_should_run_a_json_command()
+        public void RunCommand_should_run_a_json_command(
+            [Values(false, true)] bool async)
         {
-            await _subject.RunCommandAsync<BsonDocument>("{count: \"foo\"}");
+            if (async)
+            {
+                _subject.RunCommandAsync<BsonDocument>("{count: \"foo\"}").GetAwaiter().GetResult();
+            }
+            else
+            {
+                _subject.RunCommand<BsonDocument>("{count: \"foo\"}");
+            }
 
-            var call = _operationExecutor.GetWriteCall<BsonDocument>();
+            var call = _operationExecutor.GetReadCall<BsonDocument>();
 
-            call.Operation.Should().BeOfType<WriteCommandOperation<BsonDocument>>();
-            var op = (WriteCommandOperation<BsonDocument>)call.Operation;
+            call.Binding.Should().BeOfType<ReadPreferenceBinding>();
+            var binding = (ReadPreferenceBinding)call.Binding;
+            binding.ReadPreference.Should().Be(ReadPreference.Primary);
+
+            call.Operation.Should().BeOfType<ReadCommandOperation<BsonDocument>>();
+            var op = (ReadCommandOperation<BsonDocument>)call.Operation;
             op.DatabaseNamespace.DatabaseName.Should().Be("foo");
             op.Command.Should().Be("{count: \"foo\"}");
         }
 
         [Test]
-        public async Task RunCommand_should_run_a_serialized_command()
+        public void RunCommand_should_run_a_serialized_command(
+            [Values(false, true)] bool async)
         {
             var cmd = new CountCommand { Collection = "foo" };
-            await _subject.RunCommandAsync(new ObjectCommand<BsonDocument>(cmd));
 
-            var call = _operationExecutor.GetWriteCall<BsonDocument>();
+            if (async)
+            {
+                _subject.RunCommandAsync(new ObjectCommand<BsonDocument>(cmd)).GetAwaiter().GetResult();
+            }
+            else
+            {
+                _subject.RunCommand(new ObjectCommand<BsonDocument>(cmd));
+            }
 
-            call.Operation.Should().BeOfType<WriteCommandOperation<BsonDocument>>();
-            var op = (WriteCommandOperation<BsonDocument>)call.Operation;
+            var call = _operationExecutor.GetReadCall<BsonDocument>();
+
+            call.Binding.Should().BeOfType<ReadPreferenceBinding>();
+            var binding = (ReadPreferenceBinding)call.Binding;
+            binding.ReadPreference.Should().Be(ReadPreference.Primary);
+
+            call.Operation.Should().BeOfType<ReadCommandOperation<BsonDocument>>();
+            var op = (ReadCommandOperation<BsonDocument>)call.Operation;
             op.DatabaseNamespace.DatabaseName.Should().Be("foo");
             op.Command.Should().Be("{count: \"foo\"}");
         }

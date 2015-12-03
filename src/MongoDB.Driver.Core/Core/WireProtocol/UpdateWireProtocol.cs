@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -44,9 +44,9 @@ namespace MongoDB.Driver.Core.WireProtocol
             bool isUpsert)
             : base(collectionNamespace, messageEncoderSettings, writeConcern)
         {
-            _updateValidator = Ensure.IsNotNull(updateValidator, "updateValidator");
-            _query = Ensure.IsNotNull(query, "query");
-            _update = Ensure.IsNotNull(update, "update");
+            _updateValidator = Ensure.IsNotNull(updateValidator, nameof(updateValidator));
+            _query = Ensure.IsNotNull(query, nameof(query));
+            _update = Ensure.IsNotNull(update, nameof(update));
             _isMulti = isMulti;
             _isUpsert = isUpsert;
         }

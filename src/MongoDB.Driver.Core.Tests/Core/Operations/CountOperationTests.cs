@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -44,8 +44,12 @@ namespace MongoDB.Driver.Core.Operations
         }
 
         [Test]
-        public void CreateCommand_should_create_the_correct_command()
+        [Category("ReadConcern")]
+        public void CreateCommand_should_create_the_correct_command(
+            [Values("3.0.0", "3.2.0")] string serverVersion,
+            [Values(null, ReadConcernLevel.Local, ReadConcernLevel.Majority)] ReadConcernLevel? readConcernLevel)
         {
+            var semanticServerVersion = SemanticVersion.Parse(serverVersion);
             var filter = new BsonDocument("x", 1);
             var hint = "funny";
             var limit = 10;
@@ -57,6 +61,7 @@ namespace MongoDB.Driver.Core.Operations
                 Hint = hint,
                 Limit = limit,
                 MaxTime = maxTime,
+                ReadConcern = new ReadConcern(readConcernLevel),
                 Skip = skip
             };
             var expectedResult = new BsonDocument
@@ -69,79 +74,85 @@ namespace MongoDB.Driver.Core.Operations
                 { "maxTimeMS", maxTime.TotalMilliseconds }
             };
 
-            var result = subject.CreateCommand();
+            if (!subject.ReadConcern.IsServerDefault)
+            {
+                expectedResult["readConcern"] = subject.ReadConcern.ToBsonDocument();
+            }
 
-            result.Should().Be(expectedResult);
+            if (!subject.ReadConcern.IsSupported(semanticServerVersion))
+            {
+                Action act = () => subject.CreateCommand(semanticServerVersion);
+                act.ShouldThrow<MongoClientException>();
+            }
+            else
+            {
+                var result = subject.CreateCommand(semanticServerVersion);
+                result.Should().Be(expectedResult);
+            }
         }
 
         [Test]
         [RequiresServer("EnsureTestData")]
-        public async Task ExecuteAsync_should_return_expected_result()
+        public void Execute_should_return_expected_result(
+            [Values(false, true)]
+            bool async)
         {
             var subject = new CountOperation(_collectionNamespace, _messageEncoderSettings);
 
-            long result;
-            using (var binding = CoreTestConfiguration.GetReadBinding())
-            {
-                result = await subject.ExecuteAsync(binding, CancellationToken.None);
-            }
+            var result = ExecuteOperation(subject, async);
 
             result.Should().Be(5);
         }
 
         [Test]
         [RequiresServer("EnsureTestData")]
-        public async Task ExecuteAsync_should_return_expected_result_when_filter_is_provided()
+        public void Execute_should_return_expected_result_when_filter_is_provided(
+            [Values(false, true)]
+            bool async)
         {
             var subject = new CountOperation(_collectionNamespace, _messageEncoderSettings);
             subject.Filter = BsonDocument.Parse("{ _id : { $gt : 1 } }");
 
-            long result;
-            using (var binding = CoreTestConfiguration.GetReadBinding())
-            {
-                result = await subject.ExecuteAsync(binding, CancellationToken.None);
-            }
+            var result = ExecuteOperation(subject, async);
 
             result.Should().Be(4);
         }
 
         [Test]
         [RequiresServer("EnsureTestData")]
-        public async Task ExecuteAsync_should_return_expected_result_when_hint_is_provided()
+        public void Execute_should_return_expected_result_when_hint_is_provided(
+            [Values(false, true)]
+            bool async)
         {
             var subject = new CountOperation(_collectionNamespace, _messageEncoderSettings);
             subject.Hint = BsonDocument.Parse("{ _id : 1 }");
 
-            long result;
-            using (var binding = CoreTestConfiguration.GetReadBinding())
-            {
-                result = await subject.ExecuteAsync(binding, CancellationToken.None);
-            }
+            var result = ExecuteOperation(subject, async);
 
             result.Should().Be(5);
         }
 
         [Test]
         [RequiresServer("EnsureTestData")]
-        public async Task ExecuteAsync_should_return_expected_result_when_limit_is_provided()
+        public void Execute_should_return_expected_result_when_limit_is_provided(
+            [Values(false, true)]
+            bool async)
         {
             var subject = new CountOperation(_collectionNamespace, _messageEncoderSettings);
             subject.Limit = 3;
 
-            long result;
-            using (var binding = CoreTestConfiguration.GetReadBinding())
-            {
-                result = await subject.ExecuteAsync(binding, CancellationToken.None);
-            }
+            var result = ExecuteOperation(subject, async);
 
             result.Should().Be(3);
         }
 
         [Test]
         [RequiresServer("EnsureTestData")]
-        public void ExecuteAsync_should_return_expected_result_when_maxTime_is_provided()
+        public void Execute_should_return_expected_result_when_maxTime_is_provided(
+            [Values(false, true)]
+            bool async)
         {
-            if (CoreTestConfiguration.ServerVersion >= new SemanticVersion(2, 4, 0))
+            if (SupportedFeatures.AreFailPointsSupported(CoreTestConfiguration.ServerVersion))
             {
                 // TODO: port FailPoint infrastructure from Driver.Tests to Core.Tests
             }
@@ -149,16 +160,14 @@ namespace MongoDB.Driver.Core.Operations
 
         [Test]
         [RequiresServer("EnsureTestData")]
-        public async Task ExecuteAsync_should_return_expected_result_when_skip_is_provided()
+        public void Execute_should_return_expected_result_when_skip_is_provided(
+            [Values(false, true)]
+            bool async)
         {
             var subject = new CountOperation(_collectionNamespace, _messageEncoderSettings);
             subject.Skip = 3;
 
-            long result;
-            using (var binding = CoreTestConfiguration.GetReadBinding())
-            {
-                result = await subject.ExecuteAsync(binding, CancellationToken.None);
-            }
+            var result = ExecuteOperation(subject, async);
 
             result.Should().Be(2);
         }

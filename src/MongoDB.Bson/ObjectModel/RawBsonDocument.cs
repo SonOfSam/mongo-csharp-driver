@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -687,6 +687,22 @@ namespace MongoDB.Bson
         public override void InsertAt(int index, BsonElement element)
         {
             throw new NotSupportedException("RawBsonDocument instances are immutable.");
+        }
+
+        /// <summary>
+        /// Materializes the RawBsonDocument into a regular BsonDocument.
+        /// </summary>
+        /// <param name="binaryReaderSettings">The binary reader settings.</param>
+        /// <returns>A BsonDocument.</returns>
+        public BsonDocument Materialize(BsonBinaryReaderSettings binaryReaderSettings)
+        {
+            ThrowIfDisposed();
+            using (var stream = new ByteBufferStream(_slice, ownsBuffer: false))
+            using (var reader = new BsonBinaryReader(stream, binaryReaderSettings))
+            {
+                var context = BsonDeserializationContext.CreateRoot(reader);
+                return BsonDocumentSerializer.Instance.Deserialize(context);
+            }
         }
 
         /// <summary>

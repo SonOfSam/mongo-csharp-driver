@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -40,19 +40,27 @@ namespace MongoDB.Driver.Core.Connections
 
         public TcpStreamFactory(TcpStreamSettings settings)
         {
-            _settings = Ensure.IsNotNull(settings, "settings");
+            _settings = Ensure.IsNotNull(settings, nameof(settings));
         }
 
         // methods
+        public Stream CreateStream(EndPoint endPoint, CancellationToken cancellationToken)
+        {
+            var socket = CreateSocket(endPoint);
+            Connect(socket, endPoint, cancellationToken);
+            return CreateNetworkStream(socket);
+        }
+
         public async Task<Stream> CreateStreamAsync(EndPoint endPoint, CancellationToken cancellationToken)
         {
-            var addressFamily = endPoint.AddressFamily;
-            if (addressFamily == AddressFamily.Unspecified || addressFamily == AddressFamily.Unknown)
-            {
-                addressFamily = _settings.AddressFamily;
-            }
-            var socket = new Socket(addressFamily, SocketType.Stream, ProtocolType.Tcp);
+            var socket = CreateSocket(endPoint);
             await ConnectAsync(socket, endPoint, cancellationToken).ConfigureAwait(false);
+            return CreateNetworkStream(socket);
+        }
+
+        // non-public methods
+        private void ConfigureConnectedSocket(Socket socket)
+        {
             socket.NoDelay = true;
             socket.ReceiveBufferSize = _settings.ReceiveBufferSize;
             socket.SendBufferSize = _settings.SendBufferSize;
@@ -62,6 +70,103 @@ namespace MongoDB.Driver.Core.Connections
             {
                 socketConfigurator(socket);
             }
+        }
+
+        private void Connect(Socket socket, EndPoint endPoint, CancellationToken cancellationToken)
+        {
+            var connected = false;
+            var cancelled = false;
+            var timedOut = false;
+
+            using (var registration = cancellationToken.Register(() => { if (!connected) { cancelled = true; try { socket.Close(); } catch { } } }))
+            using (var timer = new Timer(_ => { if (!connected) { timedOut = true; try { socket.Close(); } catch { } } }, null, _settings.ConnectTimeout, Timeout.InfiniteTimeSpan))
+            {
+                try
+                {
+                    var dnsEndPoint = endPoint as DnsEndPoint;
+                    if (dnsEndPoint != null)
+                    {
+                        // mono doesn't support DnsEndPoint in its BeginConnect method.
+                        socket.Connect(dnsEndPoint.Host, dnsEndPoint.Port);
+                    }
+                    else
+                    {
+                        socket.Connect(endPoint);
+                    }
+                    connected = true;
+                    return;
+                }
+                catch
+                {
+                    if (!cancelled && !timedOut)
+                    {
+                        throw;
+                    }
+                }
+            }
+
+            if (socket.Connected)
+            {
+                try { socket.Close(); } catch { }
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            if (timedOut)
+            {
+                var message = string.Format("Timed out connecting to {0}. Timeout was {1}.", endPoint, _settings.ConnectTimeout);
+                throw new TimeoutException(message);
+            }
+        }
+
+        private async Task ConnectAsync(Socket socket, EndPoint endPoint, CancellationToken cancellationToken)
+        {
+            var connected = false;
+            var cancelled = false;
+            var timedOut = false;
+
+            using (var registration = cancellationToken.Register(() => { if (!connected) { cancelled = true; try { socket.Close(); } catch { } } }))
+            using (var timer = new Timer(_ => { if (!connected) { timedOut = true; try { socket.Close(); } catch { } } }, null, _settings.ConnectTimeout, Timeout.InfiniteTimeSpan))
+            {
+                try
+                {
+                    var dnsEndPoint = endPoint as DnsEndPoint;
+                    if (dnsEndPoint != null)
+                    {
+                        // mono doesn't support DnsEndPoint in its BeginConnect method.
+                        await Task.Factory.FromAsync(socket.BeginConnect(dnsEndPoint.Host, dnsEndPoint.Port, null, null), socket.EndConnect).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await Task.Factory.FromAsync(socket.BeginConnect(endPoint, null, null), socket.EndConnect).ConfigureAwait(false);
+                    }
+                    connected = true;
+                    return;
+                }
+                catch
+                {
+                    if (!cancelled && !timedOut)
+                    {
+                        throw;
+                    }
+                }
+            }
+
+            if (socket.Connected)
+            {
+                try { socket.Close(); } catch { }
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            if (timedOut)
+            {
+                var message = string.Format("Timed out connecting to {0}. Timeout was {1}.", endPoint, _settings.ConnectTimeout);
+                throw new TimeoutException(message);
+            }
+        }
+
+        private NetworkStream CreateNetworkStream(Socket socket)
+        {
+            ConfigureConnectedSocket(socket);
 
             var stream = new NetworkStream(socket, true);
 
@@ -86,45 +191,14 @@ namespace MongoDB.Driver.Core.Connections
             return stream;
         }
 
-        // non-public methods
-        private async Task ConnectAsync(Socket socket, EndPoint endPoint, CancellationToken cancellationToken)
+        private Socket CreateSocket(EndPoint endPoint)
         {
-            Task connectTask;
-            var dnsEndPoint = endPoint as DnsEndPoint;
-            if (dnsEndPoint != null)
+            var addressFamily = endPoint.AddressFamily;
+            if (addressFamily == AddressFamily.Unspecified || addressFamily == AddressFamily.Unknown)
             {
-                // mono doesn't support DnsEndPoint in its BeginConnect method.
-                connectTask = Task.Factory.FromAsync(socket.BeginConnect(dnsEndPoint.Host, dnsEndPoint.Port, null, null), socket.EndConnect);
+                addressFamily = _settings.AddressFamily;
             }
-            else
-            {
-                connectTask = Task.Factory.FromAsync(socket.BeginConnect(endPoint, null, null), socket.EndConnect);
-            }
-
-            if (_settings.ConnectTimeout == Timeout.InfiniteTimeSpan)
-            {
-                await connectTask.ConfigureAwait(false);
-                return;
-            }
-
-            using (var delayCancellationTokenSource = new CancellationTokenSource())
-            {
-                var delayTask = Task.Delay(_settings.ConnectTimeout, delayCancellationTokenSource.Token);
-
-                var completedTask = await Task.WhenAny(connectTask, delayTask).ConfigureAwait(false);
-                
-                // kill the delay timer as soon as possible
-                delayCancellationTokenSource.Cancel();
-
-                if (completedTask == delayTask && !socket.Connected)
-                {
-                    socket.Dispose();
-                    var message = string.Format("Timed out connecting to {0}. Timeout was {1}.", endPoint, _settings.ConnectTimeout);
-                    throw new TimeoutException(message);
-                }
-
-                await connectTask.ConfigureAwait(false);
-            }
+            return new Socket(addressFamily, SocketType.Stream, ProtocolType.Tcp);
         }
     }
 }

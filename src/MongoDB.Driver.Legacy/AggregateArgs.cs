@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -43,6 +43,7 @@ namespace MongoDB.Driver
         // private fields
         private bool? _allowDiskUse;
         private int? _batchSize;
+        private bool? _bypassDocumentValidation;
         private TimeSpan? _maxTime;
         private AggregateOutputMode _outputMode = AggregateOutputMode.Inline;
         private IEnumerable<BsonDocument> _pipeline;
@@ -71,6 +72,18 @@ namespace MongoDB.Driver
                 }
                 _batchSize = value;
             }
+        }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether to bypass document validation.
+        /// </summary>
+        /// <value>
+        /// A value indicating whether to bypass document validation.
+        /// </value>
+        public bool? BypassDocumentValidation
+        {
+            get { return _bypassDocumentValidation; }
+            set { _bypassDocumentValidation = value; }
         }
 
         /// <summary>

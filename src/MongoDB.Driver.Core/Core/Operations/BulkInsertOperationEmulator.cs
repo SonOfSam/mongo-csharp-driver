@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+﻿/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -37,6 +37,24 @@ namespace MongoDB.Driver.Core.Operations
         }
 
         //  methods
+        protected override WriteConcernResult ExecuteProtocol(IChannelHandle channel, WriteRequest request, CancellationToken cancellationToken)
+        {
+            var insertRequest = (InsertRequest)request;
+            var documentSource = new BatchableSource<BsonDocument>(new[] { insertRequest.Document });
+
+            return channel.Insert(
+                CollectionNamespace,
+                WriteConcern,
+                BsonDocumentSerializer.Instance,
+                MessageEncoderSettings,
+                documentSource,
+                MaxBatchCount,
+                MaxBatchLength,
+                !IsOrdered, // continueOnError
+                null, // shouldSendGetLastError
+                cancellationToken);
+        }
+
         protected override Task<WriteConcernResult> ExecuteProtocolAsync(IChannelHandle channel, WriteRequest request, CancellationToken cancellationToken)
         {
             var insertRequest = (InsertRequest)request;
@@ -50,7 +68,7 @@ namespace MongoDB.Driver.Core.Operations
                 documentSource,
                 MaxBatchCount,
                 MaxBatchLength,
-                false, // continueOnError
+                !IsOrdered, // continueOnError
                 null, // shouldSendGetLastError
                 cancellationToken);
         }

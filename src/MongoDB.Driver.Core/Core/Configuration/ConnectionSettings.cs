@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -101,7 +101,7 @@ namespace MongoDB.Driver.Core.Configuration
             Optional<TimeSpan> maxLifeTime = default(Optional<TimeSpan>))
         {
             return new ConnectionSettings(
-                authenticators: Optional.Create(authenticators.WithDefault(_authenticators)),
+                authenticators: Optional.Enumerable(authenticators.WithDefault(_authenticators)),
                 maxIdleTime: maxIdleTime.WithDefault(_maxIdleTime),
                 maxLifeTime: maxLifeTime.WithDefault(_maxLifeTime));
         }

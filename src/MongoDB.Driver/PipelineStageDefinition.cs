@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -47,6 +47,7 @@ namespace MongoDB.Driver
     /// <summary>
     /// A rendered pipeline stage.
     /// </summary>
+    /// <typeparam name="TOutput">The type of the output.</typeparam>
     public class RenderedPipelineStageDefinition<TOutput> : IRenderedPipelineStageDefinition
     {
         private string _operatorName;
@@ -61,9 +62,9 @@ namespace MongoDB.Driver
         /// <param name="outputSerializer">The output serializer.</param>
         public RenderedPipelineStageDefinition(string operatorName, BsonDocument document, IBsonSerializer<TOutput> outputSerializer)
         {
-            _operatorName = Ensure.IsNotNull(operatorName, "operatorName");
-            _document = Ensure.IsNotNull(document, "document");
-            _outputSerializer = Ensure.IsNotNull(outputSerializer, "outputSerializer");
+            _operatorName = Ensure.IsNotNull(operatorName, nameof(operatorName));
+            _document = Ensure.IsNotNull(document, nameof(document));
+            _outputSerializer = Ensure.IsNotNull(outputSerializer, nameof(outputSerializer));
         }
 
         /// <inheritdoc />
@@ -125,12 +126,14 @@ namespace MongoDB.Driver
     /// <summary>
     /// Base class for pipeline stages.
     /// </summary>
+    /// <typeparam name="TInput">The type of the input.</typeparam>
+    /// <typeparam name="TOutput">The type of the output.</typeparam>
     public abstract class PipelineStageDefinition<TInput, TOutput> : IPipelineStageDefinition
     {
         /// <summary>
         /// Gets the type of the input.
         /// </summary>
-        Type IPipelineStageDefinition.InputType
+        public Type InputType
         {
             get { return typeof(TInput); }
         }
@@ -141,7 +144,7 @@ namespace MongoDB.Driver
         /// <summary>
         /// Gets the type of the output.
         /// </summary>
-        Type IPipelineStageDefinition.OutputType
+        public Type OutputType
         {
             get { return typeof(TOutput); }
         }
@@ -198,6 +201,8 @@ namespace MongoDB.Driver
     /// <summary>
     /// A <see cref="BsonDocument"/> based stage.
     /// </summary>
+    /// <typeparam name="TInput">The type of the input.</typeparam>
+    /// <typeparam name="TOutput">The type of the output.</typeparam>
     public sealed class BsonDocumentPipelineStageDefinition<TInput, TOutput> : PipelineStageDefinition<TInput, TOutput>
     {
         private readonly BsonDocument _document;
@@ -210,7 +215,7 @@ namespace MongoDB.Driver
         /// <param name="outputSerializer">The output serializer.</param>
         public BsonDocumentPipelineStageDefinition(BsonDocument document, IBsonSerializer<TOutput> outputSerializer = null)
         {
-            _document = Ensure.IsNotNull(document, "document");
+            _document = Ensure.IsNotNull(document, nameof(document));
             _outputSerializer = outputSerializer;
         }
 
@@ -233,6 +238,8 @@ namespace MongoDB.Driver
     /// <summary>
     /// A JSON <see cref="String"/> based pipeline stage.
     /// </summary>
+    /// <typeparam name="TInput">The type of the input.</typeparam>
+    /// <typeparam name="TOutput">The type of the output.</typeparam>
     public sealed class JsonPipelineStageDefinition<TInput, TOutput> : PipelineStageDefinition<TInput, TOutput>
     {
         private readonly BsonDocument _document;
@@ -246,7 +253,7 @@ namespace MongoDB.Driver
         /// <param name="outputSerializer">The output serializer.</param>
         public JsonPipelineStageDefinition(string json, IBsonSerializer<TOutput> outputSerializer = null)
         {
-            _json = Ensure.IsNotNullOrEmpty(json, "json");
+            _json = Ensure.IsNotNullOrEmpty(json, nameof(json));
             _outputSerializer = outputSerializer;
 
             _document = BsonDocument.Parse(json);

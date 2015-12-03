@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -40,7 +40,7 @@ namespace MongoDB.Driver
         public MongoNotPrimaryException(ConnectionId connectionId, BsonDocument result)
             : base(connectionId, "Server returned not master error.")
         {
-            _result = Ensure.IsNotNull(result, "result");
+            _result = Ensure.IsNotNull(result, nameof(result));
         }
 
         /// <summary>

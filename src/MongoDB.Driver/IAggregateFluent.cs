@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 * limitations under the License.
 */
 
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -50,7 +51,15 @@ namespace MongoDB.Driver
         IAggregateFluent<TNewResult> AppendStage<TNewResult>(PipelineStageDefinition<TResult, TNewResult> stage);
 
         /// <summary>
-        /// Appends a group stage to the stages.
+        /// Appends a project stage to the pipeline.
+        /// </summary>
+        /// <typeparam name="TNewResult">The type of the new result.</typeparam>
+        /// <param name="newResultSerializer">The new result serializer.</param>
+        /// <returns>The fluent aggregate interface.</returns>
+        IAggregateFluent<TNewResult> As<TNewResult>(IBsonSerializer<TNewResult> newResultSerializer = null);
+
+        /// <summary>
+        /// Appends a group stage to the pipeline.
         /// </summary>
         /// <typeparam name="TNewResult">The type of the result of the stage.</typeparam>
         /// <param name="group">The group projection.</param>
@@ -65,6 +74,19 @@ namespace MongoDB.Driver
         IAggregateFluent<TResult> Limit(int limit);
 
         /// <summary>
+        /// Appends a lookup stage to the pipeline.
+        /// </summary>
+        /// <typeparam name="TForeignDocument">The type of the foreign document.</typeparam>
+        /// <typeparam name="TNewResult">The type of the new result.</typeparam>
+        /// <param name="foreignCollectionName">Name of the other collection.</param>
+        /// <param name="localField">The local field.</param>
+        /// <param name="foreignField">The foreign field.</param>
+        /// <param name="as">The field in <typeparamref name="TNewResult" /> to place the foreign results.</param>
+        /// <param name="options">The options.</param>
+        /// <returns>The fluent aggregate interface.</returns>
+        IAggregateFluent<TNewResult> Lookup<TForeignDocument, TNewResult>(string foreignCollectionName, FieldDefinition<TResult> localField, FieldDefinition<TForeignDocument> foreignField, FieldDefinition<TNewResult> @as, AggregateLookupOptions<TForeignDocument, TNewResult> options = null);
+
+        /// <summary>
         /// Appends a match stage to the pipeline.
         /// </summary>
         /// <param name="filter">The filter.</param>
@@ -72,11 +94,27 @@ namespace MongoDB.Driver
         IAggregateFluent<TResult> Match(FilterDefinition<TResult> filter);
 
         /// <summary>
+        /// Appends a match stage to the pipeline that matches derived documents and changes the result type to the derived type.
+        /// </summary>
+        /// <typeparam name="TNewResult">The type of the derived documents.</typeparam>
+        /// <param name="newResultSerializer">The new result serializer.</param>
+        /// <returns>The fluent aggregate interface.</returns>
+        IAggregateFluent<TNewResult> OfType<TNewResult>(IBsonSerializer<TNewResult> newResultSerializer = null) where TNewResult : TResult;
+
+        /// <summary>
         /// Appends an out stage to the pipeline and executes it, and then returns a cursor to read the contents of the output collection.
         /// </summary>
         /// <param name="collectionName">Name of the collection.</param>
         /// <param name="cancellationToken">The cancellation token.</param>
-        /// <returns>The fluent aggregate interface.</returns>
+        /// <returns>A cursor.</returns>
+        IAsyncCursor<TResult> Out(string collectionName, CancellationToken cancellationToken = default(CancellationToken));
+
+        /// <summary>
+        /// Appends an out stage to the pipeline and executes it, and then returns a cursor to read the contents of the output collection.
+        /// </summary>
+        /// <param name="collectionName">Name of the collection.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>A Task whose result is a cursor.</returns>
         Task<IAsyncCursor<TResult>> OutAsync(string collectionName, CancellationToken cancellationToken = default(CancellationToken));
 
         /// <summary>
@@ -112,8 +150,19 @@ namespace MongoDB.Driver
         /// <returns>
         /// The fluent aggregate interface.
         /// </returns>
-        IAggregateFluent<TNewResult> Unwind<TNewResult>(FieldDefinition<TResult> field, IBsonSerializer<TNewResult> newResultSerializer = null);
+        [Obsolete("Use the Unwind overload which takes an options parameter.")]
+        IAggregateFluent<TNewResult> Unwind<TNewResult>(FieldDefinition<TResult> field, IBsonSerializer<TNewResult> newResultSerializer);
+
+        /// <summary>
+        /// Appends an unwind stage to the pipeline.
+        /// </summary>
+        /// <typeparam name="TNewResult">The type of the new result.</typeparam>
+        /// <param name="field">The field.</param>
+        /// <param name="options">The options.</param>
+        /// The fluent aggregate interface.
+        IAggregateFluent<TNewResult> Unwind<TNewResult>(FieldDefinition<TResult> field, AggregateUnwindOptions<TNewResult> options = null);
     }
+
 
     /// <summary>
     /// Fluent interface for aggregate.

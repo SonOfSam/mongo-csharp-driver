@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ using System.Text;
 using MongoDB.Bson;
 using MongoDB.Bson.IO;
 using MongoDB.Bson.Serialization;
+using MongoDB.Driver.Core.Misc;
 using MongoDB.Driver.Core.WireProtocol.Messages;
 using MongoDB.Driver.Core.WireProtocol.Messages.Encoders.BinaryEncoders;
 using MongoDB.Driver.Core.WireProtocol.Messages.Encoders.JsonEncoders;
@@ -30,20 +31,62 @@ namespace MongoDB.Driver.Core.Helpers
 {
     public class MessageHelper
     {
-        public static QueryMessage BuildQueryMessage(
-            BsonDocument query = null, 
-            int requestId = 0, 
-            CollectionNamespace collectionNamespace = null)
+        private static readonly DatabaseNamespace __defaultDatabaseNamespace = new DatabaseNamespace("foo");
+        private static readonly CollectionNamespace __defaultCollectionNamespace = new CollectionNamespace(__defaultDatabaseNamespace, "bar");
+
+        public static CollectionNamespace DefaultCollectionNamespace
         {
-            if (collectionNamespace == null)
+            get { return __defaultCollectionNamespace; }
+        }
+
+        public static DatabaseNamespace DefaultDatabaseNamespace
+        {
+            get { return __defaultDatabaseNamespace; }
+        }
+
+        public static QueryMessage BuildQuery(
+            BsonDocument query = null,
+            BsonDocument fields = null,
+            int requestId = 0,
+            CollectionNamespace collectionNamespace = null,
+            int skip = 0,
+            int batchSize = 0,
+            bool noCursorTimeout = false,
+            bool partialOk = false,
+            bool tailableCursor = false,
+            bool awaitData = false,
+            bool oplogReplay = false)
+        {
+            return new QueryMessage(
+                requestId: requestId,
+                collectionNamespace: collectionNamespace ?? __defaultCollectionNamespace,
+                query: query ?? new BsonDocument(),
+                fields: fields,
+                queryValidator: NoOpElementNameValidator.Instance,
+                skip: skip,
+                batchSize: batchSize,
+                slaveOk: false,
+                partialOk: partialOk,
+                noCursorTimeout: noCursorTimeout,
+                tailableCursor: tailableCursor,
+                awaitData: awaitData,
+                oplogReplay: oplogReplay);
+        }
+
+        public static QueryMessage BuildCommand(
+            BsonDocument command,
+            int requestId = 0,
+            DatabaseNamespace databaseNamespace = null)
+        {
+            if (databaseNamespace == null)
             {
-                collectionNamespace = new CollectionNamespace("foo", "bar");
+                databaseNamespace = __defaultDatabaseNamespace;
             }
 
             return new QueryMessage(
                 requestId: requestId,
-                collectionNamespace: collectionNamespace,
-                query: query ?? new BsonDocument(),
+                collectionNamespace: databaseNamespace.CommandCollection,
+                query: command,
                 fields: null,
                 queryValidator: NoOpElementNameValidator.Instance,
                 skip: 0,
@@ -51,11 +94,86 @@ namespace MongoDB.Driver.Core.Helpers
                 slaveOk: false,
                 partialOk: false,
                 noCursorTimeout: false,
+                oplogReplay: false,
                 tailableCursor: false,
                 awaitData: false);
         }
 
-        public static ReplyMessage<T> BuildSuccessReply<T>(
+        public static DeleteMessage BuildDelete(
+            BsonDocument query,
+            CollectionNamespace collectionNamespace = null,
+            int requestId = 0,
+            bool isMulti = false)
+        {
+            return new DeleteMessage(
+                requestId,
+                collectionNamespace ?? __defaultCollectionNamespace,
+                query,
+                isMulti);
+        }
+
+        public static GetMoreMessage BuildGetMore(
+            int requestId = 0,
+            CollectionNamespace collectionNamespace = null,
+            long cursorId = 0,
+            int batchSize = 0)
+        {
+            return new GetMoreMessage(
+                requestId,
+                collectionNamespace ?? __defaultCollectionNamespace,
+                cursorId,
+                batchSize);
+        }
+
+        public static QueryMessage BuildGetLastError(
+            WriteConcern writeConcern,
+            int requestId = 0,
+            DatabaseNamespace databaseNamespace = null)
+        {
+            var command = writeConcern.ToBsonDocument();
+            command.InsertAt(0, new BsonElement("getLastError", 1));
+            return BuildCommand(command, requestId, databaseNamespace);
+        }
+
+        public static KillCursorsMessage BuildKillCursors(int requestId = 0, long cursorId = 1)
+        {
+            return new KillCursorsMessage(requestId, new[] { cursorId });
+        }
+
+        public static InsertMessage<T> BuildInsert<T>(
+            IEnumerable<T> documents,
+            CollectionNamespace collectionNamespace = null,
+            int requestId = 0)
+        {
+            return new InsertMessage<T>(
+                requestId,
+                collectionNamespace ?? __defaultCollectionNamespace,
+                BsonSerializer.SerializerRegistry.GetSerializer<T>(),
+                new BatchableSource<T>(documents),
+                int.MaxValue,
+                int.MaxValue,
+                false);
+        }
+
+        public static ReplyMessage<T> BuildQueryFailedReply<T>(
+            BsonDocument queryFailureDocument,
+            int responseTo = 0)
+        {
+            return new ReplyMessage<T>(
+                false,
+                0,
+                false,
+                null,
+                1,
+                true,
+                queryFailureDocument,
+                0,
+                responseTo,
+                BsonSerializer.SerializerRegistry.GetSerializer<T>(),
+                0);
+        }
+
+        public static ReplyMessage<T> BuildReply<T>(
             T document,
             IBsonSerializer<T> serializer = null,
             long cursorId = 0,
@@ -63,12 +181,30 @@ namespace MongoDB.Driver.Core.Helpers
             int responseTo = 0,
             int startingFrom = 0)
         {
+            return BuildReply<T>(
+                new[] { document },
+                serializer,
+                cursorId,
+                requestId,
+                responseTo,
+                startingFrom);
+        }
+
+        public static ReplyMessage<T> BuildReply<T>(
+            IEnumerable<T> documents,
+            IBsonSerializer<T> serializer = null,
+            long cursorId = 0,
+            int requestId = 0,
+            int responseTo = 0,
+            int startingFrom = 0)
+        {
+            var documentsList = documents.ToList();
             return new ReplyMessage<T>(
                 awaitCapable: true,
                 cursorId: cursorId,
                 cursorNotFound: false,
-                documents: new[] { document }.ToList(),
-                numberReturned: 1,
+                documents: documentsList,
+                numberReturned: documentsList.Count,
                 queryFailure: false,
                 queryFailureDocument: null,
                 requestId: requestId,
@@ -97,6 +233,24 @@ namespace MongoDB.Driver.Core.Helpers
                 startingFrom: startingFrom);
         }
 
+        public static UpdateMessage BuildUpdate(
+            BsonDocument query,
+            BsonDocument update,
+            CollectionNamespace collectionNamespace = null,
+            int requestId = 0,
+            bool isMulti = false,
+            bool isUpsert = false)
+        {
+            return new UpdateMessage(
+                requestId,
+                collectionNamespace ?? __defaultCollectionNamespace,
+                query,
+                update,
+                NoOpElementNameValidator.Instance,
+                isMulti,
+                isUpsert);
+        }
+
         public static List<BsonDocument> TranslateMessagesToBsonDocuments(IEnumerable<MongoDBMessage> requests)
         {
             var docs = new List<BsonDocument>();
@@ -118,14 +272,14 @@ namespace MongoDB.Driver.Core.Helpers
             return TranslateMessagesToBsonDocuments(TranslateBytesToRequests(bytes));
         }
 
-        public static void WriteRepliesToStream(Stream stream, IEnumerable<ReplyMessage> replies)
+        public static void WriteResponsesToStream(Stream stream, IEnumerable<ResponseMessage> responses)
         {
             var startPosition = stream.Position;
-            foreach (var reply in replies)
+            foreach (var response in responses)
             {
                 var encoderFactory = new BinaryMessageEncoderFactory(stream, null);
-                var encoder = reply.GetEncoder(encoderFactory);
-                encoder.WriteMessage(reply);
+                var encoder = response.GetEncoder(encoderFactory);
+                encoder.WriteMessage(response);
             }
             stream.Position = startPosition;
         }

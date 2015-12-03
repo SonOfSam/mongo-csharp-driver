@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -63,12 +63,25 @@ namespace MongoDB.Driver.Core.Operations
             };
         }
 
+        private ReadCommandOperation<BsonDocument> CreateOperation()
+        {
+            var command = CreateCommand();
+            return new ReadCommandOperation<BsonDocument>(DatabaseNamespace.Admin, command, BsonDocumentSerializer.Instance, _messageEncoderSettings);
+        }
+
+        /// <inheritdoc/>
+        public BsonDocument Execute(IReadBinding binding, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNull(binding, nameof(binding));
+            var operation = CreateOperation();
+            return operation.Execute(binding, cancellationToken);
+        }
+
         /// <inheritdoc/>
         public async Task<BsonDocument> ExecuteAsync(IReadBinding binding, CancellationToken cancellationToken)
         {
-            Ensure.IsNotNull(binding, "binding");
-            var command = CreateCommand();
-            var operation = new ReadCommandOperation<BsonDocument>(DatabaseNamespace.Admin, command, BsonDocumentSerializer.Instance, _messageEncoderSettings);
+            Ensure.IsNotNull(binding, nameof(binding));
+            var operation = CreateOperation();
             return await operation.ExecuteAsync(binding, cancellationToken).ConfigureAwait(false);
         }
     }

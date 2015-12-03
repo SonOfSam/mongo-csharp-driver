@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ using FluentAssertions;
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization;
 using MongoDB.Bson.Serialization.Serializers;
+using MongoDB.Driver.Core.Misc;
 using NUnit.Framework;
 
 namespace MongoDB.Driver.Core.Operations
@@ -70,12 +71,17 @@ namespace MongoDB.Driver.Core.Operations
         }
 
         [Test]
-        public void CreateCommand_should_create_the_correct_command()
+        [Category("ReadConcern")]
+        public void CreateCommand_should_create_the_correct_command(
+            [Values("3.0.0", "3.2.0")] string serverVersion,
+            [Values(null, ReadConcernLevel.Local, ReadConcernLevel.Majority)] ReadConcernLevel? readConcernLevel)
         {
+            var semanticServerVersion = SemanticVersion.Parse(serverVersion);
             var subject = new DistinctOperation<int>(_collectionNamespace, _valueSerializer, _fieldName, _messageEncoderSettings)
             {
                 Filter = new BsonDocument("x", 1),
                 MaxTime = TimeSpan.FromSeconds(20),
+                ReadConcern = new ReadConcern(readConcernLevel)
             };
 
             var expectedResult = new BsonDocument
@@ -85,14 +91,29 @@ namespace MongoDB.Driver.Core.Operations
                 { "query", BsonDocument.Parse("{ x: 1 }") },
                 { "maxTimeMS", 20000 }
             };
-            var result = subject.CreateCommand();
 
-            result.Should().Be(expectedResult);
+            if (!subject.ReadConcern.IsServerDefault)
+            {
+                expectedResult["readConcern"] = subject.ReadConcern.ToBsonDocument();
+            }
+
+            if (!subject.ReadConcern.IsSupported(semanticServerVersion))
+            {
+                Action act = () => subject.CreateCommand(semanticServerVersion);
+                act.ShouldThrow<MongoClientException>();
+            }
+            else
+            {
+                var result = subject.CreateCommand(semanticServerVersion);
+                result.Should().Be(expectedResult);
+            }
         }
 
         [Test]
         [RequiresServer("EnsureTestData")]
-        public async Task ExecuteAsync_should_return_the_correct_results()
+        public void Execute_should_return_the_correct_results(
+            [Values(false, true)]
+            bool async)
         {
             var subject = new DistinctOperation<int>(_collectionNamespace, _valueSerializer, _fieldName, _messageEncoderSettings)
             {
@@ -100,8 +121,8 @@ namespace MongoDB.Driver.Core.Operations
                 MaxTime = TimeSpan.FromSeconds(20),
             };
 
-            var cursor = await ExecuteOperationAsync(subject);
-            var result = await cursor.ToListAsync();
+            var cursor = ExecuteOperation(subject, async);
+            var result = ReadCursorToEnd(cursor, async);
 
             result.Should().HaveCount(2);
             result.Should().OnlyHaveUniqueItems();

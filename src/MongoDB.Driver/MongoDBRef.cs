@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -218,23 +218,6 @@ namespace MongoDB.Driver
         }
 
         // public methods
-        /// <summary>
-        /// Gets the serialization info for a member.
-        /// </summary>
-        /// <param name="memberName">The member name.</param>
-        /// <returns>The serialization info for the member.</returns>
-        public BsonSerializationInfo GetMemberSerializationInfo(string memberName)
-        {
-            BsonSerializationInfo serializationInfo;
-            if (!TryGetMemberSerializationInfo(memberName, out serializationInfo))
-            {
-                var message = string.Format("{0} is not a member of MongoDBRef.", memberName);
-                throw new ArgumentOutOfRangeException("memberName", message);
-            }
-
-            return serializationInfo;
-        }
-
         /// <summary>
         /// Tries to get the serialization info for a member.
         /// </summary>

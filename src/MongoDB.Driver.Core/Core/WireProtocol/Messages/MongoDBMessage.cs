@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -27,6 +27,12 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages
     /// </summary>
     public abstract class MongoDBMessage : IEncodableMessage
     {
+        // properties
+        /// <summary>
+        /// Gets the type of the message.
+        /// </summary>
+        public abstract MongoDBMessageType MessageType { get; }
+
         // methods        
         /// <inheritdoc/>
         public abstract IMessageEncoder GetEncoder(IMessageEncoderFactory encoderFactory);

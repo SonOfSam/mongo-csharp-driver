@@ -1,10 +1,27 @@
-﻿using System;
+﻿/* Copyright 2015 MongoDB Inc.
+*
+* Licensed under the Apache License, Version 2.0 (the "License");
+* you may not use this file except in compliance with the License.
+* You may obtain a copy of the License at
+*
+* http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+*/
+
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using MongoDB.Bson;
+using MongoDB.Bson.Serialization;
 using MongoDB.Bson.Serialization.Serializers;
+using MongoDB.Driver.Core.Bindings;
 using MongoDB.Driver.Core.WireProtocol.Messages.Encoders;
 using NUnit.Framework;
 
@@ -30,8 +47,9 @@ namespace MongoDB.Driver.Core.Operations
         {
             try
             {
-                var dropDatabaseOperation = new DropDatabaseOperation(_databaseNamespace, _messageEncoderSettings);
-                ExecuteOperation(dropDatabaseOperation);
+                // TODO: DropDatabase
+                //var dropDatabaseOperation = new DropDatabaseOperation(_databaseNamespace, _messageEncoderSettings);
+                //ExecuteOperation(dropDatabaseOperation);
             }
             catch
             {
@@ -39,29 +57,10 @@ namespace MongoDB.Driver.Core.Operations
             }
         }
 
-        protected async Task<TException> CatchAsync<TException>(Func<Task> action)
-            where TException : Exception
-        {
-            try
-            {
-                await action();
-                Assert.Fail("Expected an exception of type {0} but got none.", typeof(TException));
-            }
-            catch (TException ex)
-            {
-                return ex;
-            }
-            catch (Exception ex)
-            {
-                Assert.Fail("Expected an exception of type {0} but got {1}.", typeof(TException), ex.GetType());
-            }
-
-            throw new InvalidOperationException("We should never get here!");
-        }
-
         protected void DropDatabase()
         {
-            DropDatabaseAsync().GetAwaiter().GetResult();
+            var dropDatabaseOperation = new DropDatabaseOperation(_databaseNamespace, _messageEncoderSettings);
+            ExecuteOperation(dropDatabaseOperation);
         }
 
         protected Task DropDatabaseAsync()
@@ -72,7 +71,8 @@ namespace MongoDB.Driver.Core.Operations
 
         protected void DropCollection()
         {
-            DropCollectionAsync().GetAwaiter().GetResult();
+            var dropCollectionOperation = new DropCollectionOperation(_collectionNamespace, _messageEncoderSettings);
+            ExecuteOperation(dropCollectionOperation);
         }
 
         protected Task DropCollectionAsync()
@@ -83,20 +83,79 @@ namespace MongoDB.Driver.Core.Operations
 
         protected TResult ExecuteOperation<TResult>(IReadOperation<TResult> operation)
         {
-            return ExecuteOperationAsync(operation).GetAwaiter().GetResult();
+            using (var binding = CoreTestConfiguration.GetReadBinding())
+            {
+                return operation.Execute(binding, CancellationToken.None);
+            }
+        }
+
+        protected TResult ExecuteOperation<TResult>(IReadOperation<TResult> operation, bool async)
+        {
+            if (async)
+            {
+                return ExecuteOperationAsync(operation).GetAwaiter().GetResult();
+            }
+            else
+            {
+                return ExecuteOperation(operation);
+            }
+        }
+
+        protected TResult ExecuteOperation<TResult>(IReadOperation<TResult> operation, IReadBinding binding, bool async)
+        {
+            if (async)
+            {
+                return operation.ExecuteAsync(binding, CancellationToken.None).GetAwaiter().GetResult();
+            }
+            else
+            {
+                return operation.Execute(binding, CancellationToken.None);
+            }
         }
 
         protected TResult ExecuteOperation<TResult>(IWriteOperation<TResult> operation)
         {
-            return ExecuteOperationAsync(operation).GetAwaiter().GetResult();
+            using (var binding = CoreTestConfiguration.GetReadWriteBinding())
+            {
+                return operation.Execute(binding, CancellationToken.None);
+            }
+        }
+
+        protected TResult ExecuteOperation<TResult>(IWriteOperation<TResult> operation, bool async)
+        {
+            if (async)
+            {
+                return ExecuteOperationAsync(operation).GetAwaiter().GetResult();
+            }
+            else
+            {
+                return ExecuteOperation(operation);
+            }
+        }
+
+        protected TResult ExecuteOperation<TResult>(IWriteOperation<TResult> operation, IReadWriteBinding binding, bool async)
+        {
+            if (async)
+            {
+                return operation.ExecuteAsync(binding, CancellationToken.None).GetAwaiter().GetResult();
+            }
+            else
+            {
+                return operation.Execute(binding, CancellationToken.None);
+            }
         }
 
         protected async Task<TResult> ExecuteOperationAsync<TResult>(IReadOperation<TResult> operation)
         {
             using (var binding = CoreTestConfiguration.GetReadBinding())
             {
-                return await operation.ExecuteAsync(binding, CancellationToken.None);
+                return await ExecuteOperationAsync(operation, binding);
             }
+        }
+
+        protected async Task<TResult> ExecuteOperationAsync<TResult>(IReadOperation<TResult> operation, IReadBinding binding)
+        {
+            return await operation.ExecuteAsync(binding, CancellationToken.None);
         }
 
         protected async Task<TResult> ExecuteOperationAsync<TResult>(IWriteOperation<TResult> operation)
@@ -107,6 +166,21 @@ namespace MongoDB.Driver.Core.Operations
             }
         }
 
+        protected async Task<TResult> ExecuteOperationAsync<TResult>(IWriteOperation<TResult> operation, IWriteBinding binding)
+        {
+            return await operation.ExecuteAsync(binding, CancellationToken.None);
+        }
+
+        protected void CreateIndexes(params CreateIndexRequest[] requests)
+        {
+            var operation = new CreateIndexesOperation(
+                _collectionNamespace,
+                requests,
+                _messageEncoderSettings);
+
+            ExecuteOperation(operation);
+        }
+
         protected void Insert(params BsonDocument[] documents)
         {
             Insert((IEnumerable<BsonDocument>)documents);
@@ -114,7 +188,9 @@ namespace MongoDB.Driver.Core.Operations
 
         protected void Insert(IEnumerable<BsonDocument> documents)
         {
-            InsertAsync(documents).GetAwaiter().GetResult();
+            var requests = documents.Select(d => new InsertRequest(d));
+            var insertOperation = new BulkInsertOperation(_collectionNamespace, requests, _messageEncoderSettings);
+            ExecuteOperation(insertOperation);
         }
 
         protected Task InsertAsync(params BsonDocument[] documents)
@@ -129,6 +205,35 @@ namespace MongoDB.Driver.Core.Operations
             await ExecuteOperationAsync(insertOperation);
         }
 
+        protected List<BsonDocument> ReadAllFromCollection()
+        {
+            return ReadAllFromCollection(_collectionNamespace);
+        }
+
+        protected List<BsonDocument> ReadAllFromCollection(bool async)
+        {
+            return ReadAllFromCollection(_collectionNamespace, async);
+        }
+
+        protected List<BsonDocument> ReadAllFromCollection(CollectionNamespace collectionNamespace)
+        {
+            var operation = new FindOperation<BsonDocument>(collectionNamespace, BsonDocumentSerializer.Instance, _messageEncoderSettings);
+            var cursor = ExecuteOperation(operation);
+            return ReadCursorToEnd(cursor);
+        }
+
+        protected List<BsonDocument> ReadAllFromCollection(CollectionNamespace collectionNamespace, bool async)
+        {
+            if (async)
+            {
+                return ReadAllFromCollectionAsync(collectionNamespace).GetAwaiter().GetResult();
+            }
+            else
+            {
+                return ReadAllFromCollection(collectionNamespace);
+            }
+        }
+
         protected Task<List<BsonDocument>> ReadAllFromCollectionAsync()
         {
             return ReadAllFromCollectionAsync(_collectionNamespace);
@@ -141,9 +246,34 @@ namespace MongoDB.Driver.Core.Operations
             return await ReadCursorToEndAsync(cursor);
         }
 
-        protected async Task<List<BsonDocument>> ReadCursorToEndAsync(IAsyncCursor<BsonDocument> cursor)
+        protected List<T> ReadCursorToEnd<T>(IAsyncCursor<T> cursor)
         {
-            var documents = new List<BsonDocument>();
+            var documents = new List<T>();
+            while (cursor.MoveNext(CancellationToken.None))
+            {
+                foreach (var document in cursor.Current)
+                {
+                    documents.Add(document);
+                }
+            }
+            return documents;
+        }
+
+        protected List<T> ReadCursorToEnd<T>(IAsyncCursor<T> cursor, bool async)
+        {
+            if (async)
+            {
+                return ReadCursorToEndAsync(cursor).GetAwaiter().GetResult();
+            }
+            else
+            {
+                return ReadCursorToEnd(cursor);
+            }
+        }
+
+        protected async Task<List<T>> ReadCursorToEndAsync<T>(IAsyncCursor<T> cursor)
+        {
+            var documents = new List<T>();
             while (await cursor.MoveNextAsync(CancellationToken.None))
             {
                 foreach (var document in cursor.Current)

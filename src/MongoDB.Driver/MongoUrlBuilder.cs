@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -51,9 +51,11 @@ namespace MongoDB.Driver
         private int _maxConnectionPoolSize;
         private int _minConnectionPoolSize;
         private string _password;
+        private ReadConcernLevel? _readConcernLevel;
         private ReadPreference _readPreference;
         private string _replicaSetName;
         private IEnumerable<MongoServerAddress> _servers;
+        private TimeSpan _serverSelectionTimeout;
         private TimeSpan _socketTimeout;
         private string _username;
         private bool _useSsl;
@@ -85,10 +87,12 @@ namespace MongoDB.Driver
             _maxConnectionPoolSize = MongoDefaults.MaxConnectionPoolSize;
             _minConnectionPoolSize = MongoDefaults.MinConnectionPoolSize;
             _password = null;
+            _readConcernLevel = null;
             _readPreference = null;
             _replicaSetName = null;
             _localThreshold = MongoDefaults.LocalThreshold;
             _servers = new[] { new MongoServerAddress("localhost", 27017) };
+            _serverSelectionTimeout = MongoDefaults.ServerSelectionTimeout;
             _socketTimeout = MongoDefaults.SocketTimeout;
             _username = null;
             _useSsl = false;
@@ -330,6 +334,15 @@ namespace MongoDB.Driver
         }
 
         /// <summary>
+        /// Gets or sets the read concern level.
+        /// </summary>
+        public ReadConcernLevel? ReadConcernLevel
+        {
+            get { return _readConcernLevel; }
+            set { _readConcernLevel = value; }
+        }
+
+        /// <summary>
         /// Gets or sets the read preference.
         /// </summary>
         public ReadPreference ReadPreference
@@ -373,6 +386,22 @@ namespace MongoDB.Driver
         {
             get { return _servers; }
             set { _servers = value; }
+        }
+
+        /// <summary>
+        /// Gets or sets the server selection timeout.
+        /// </summary>
+        public TimeSpan ServerSelectionTimeout
+        {
+            get { return _serverSelectionTimeout; }
+            set
+            {
+                if (value < TimeSpan.Zero)
+                {
+                    throw new ArgumentOutOfRangeException("value", "ServerSelectionTimeout must be greater than or equal to zero.");
+                }
+                _serverSelectionTimeout = value;
+            }
         }
 
         /// <summary>
@@ -551,6 +580,7 @@ namespace MongoDB.Driver
             _maxConnectionPoolSize = connectionString.MaxPoolSize.GetValueOrDefault(MongoDefaults.MaxConnectionPoolSize);
             _minConnectionPoolSize = connectionString.MinPoolSize.GetValueOrDefault(MongoDefaults.MinConnectionPoolSize);
             _password = connectionString.Password;
+            _readConcernLevel = connectionString.ReadConcernLevel;
             if (connectionString.ReadPreference != null)
             {
                 _readPreference = new ReadPreference(connectionString.ReadPreference.Value);
@@ -561,7 +591,7 @@ namespace MongoDB.Driver
                 {
                     throw new MongoConfigurationException("ReadPreferenceMode is required when using tag sets.");
                 }
-                _readPreference = _readPreference.With(tagSets: Optional.Create<IEnumerable<TagSet>>(connectionString.ReadPreferenceTags));
+                _readPreference = _readPreference.With(tagSets: connectionString.ReadPreferenceTags);
             }
 
             _replicaSetName = connectionString.ReplicaSet;
@@ -576,13 +606,19 @@ namespace MongoDB.Driver
                 }
                 else if ((ipEndPoint = endPoint as IPEndPoint) != null)
                 {
-                    return new MongoServerAddress(ipEndPoint.Address.ToString(), ipEndPoint.Port);
+                    var address = ipEndPoint.Address.ToString();
+                    if (ipEndPoint.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+                    {
+                        address = "[" + address + "]";
+                    }
+                    return new MongoServerAddress(address, ipEndPoint.Port);
                 }
                 else
                 {
                     throw new NotSupportedException("Only DnsEndPoint and IPEndPoints are supported in the connection string.");
                 }
             });
+            _serverSelectionTimeout = connectionString.ServerSelectionTimeout.GetValueOrDefault(MongoDefaults.ServerSelectionTimeout);
             _socketTimeout = connectionString.SocketTimeout.GetValueOrDefault(MongoDefaults.SocketTimeout);
             _username = connectionString.Username;
             _useSsl = connectionString.Ssl.GetValueOrDefault(false);
@@ -691,6 +727,10 @@ namespace MongoDB.Driver
             {
                 query.AppendFormat("replicaSet={0};", _replicaSetName);
             }
+            if (_readConcernLevel != null)
+            {
+                query.AppendFormat("readConcernLevel={0};", MongoUtils.ToCamelCase(_readConcernLevel.Value.ToString()));
+            }
             if (_readPreference != null)
             {
                 query.AppendFormat("readPreference={0};", MongoUtils.ToCamelCase(_readPreference.ReadPreferenceMode.ToString()));
@@ -741,6 +781,10 @@ namespace MongoDB.Driver
             if (_localThreshold != MongoDefaults.LocalThreshold)
             {
                 query.AppendFormat("localThreshold={0};", FormatTimeSpan(_localThreshold));
+            }
+            if (_serverSelectionTimeout != MongoDefaults.ServerSelectionTimeout)
+            {
+                query.AppendFormat("serverSelectionTimeout={0};", FormatTimeSpan(_serverSelectionTimeout));
             }
             if (_socketTimeout != MongoDefaults.SocketTimeout)
             {

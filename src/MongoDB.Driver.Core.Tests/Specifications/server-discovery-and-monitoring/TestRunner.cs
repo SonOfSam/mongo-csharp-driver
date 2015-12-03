@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ namespace MongoDB.Driver.Specifications.server_discovery_and_monitoring
     public class TestRunner
     {
         private ICluster _cluster;
-        private IClusterListener _clusterListener;
+        private IEventSubscriber _eventSubscriber;
         private MockClusterableServerFactory _serverFactory;
 
         [TestCaseSource(typeof(TestCaseFactory), "GetTestCases")]
@@ -76,6 +76,8 @@ namespace MongoDB.Driver.Specifications.server_discovery_and_monitoring
             var description = currentDescription.With(
                 state: isMasterResult.Wrapped.GetValue("ok", false).ToBoolean() ? ServerState.Connected : ServerState.Disconnected,
                 type: isMasterResult.ServerType,
+                canonicalEndPoint: isMasterResult.Me,
+                electionId: isMasterResult.ElectionId,
                 replicaSetConfig: isMasterResult.GetReplicaSetConfig());
 
             _serverFactory.PublishDescription(description);
@@ -175,13 +177,13 @@ namespace MongoDB.Driver.Specifications.server_discovery_and_monitoring
         {
             var connectionString = new ConnectionString((string)definition["uri"]);
             var settings = new ClusterSettings(
-                endPoints: Optional.Create<IEnumerable<EndPoint>>(connectionString.Hosts),
+                endPoints: Optional.Enumerable(connectionString.Hosts),
                 connectionMode: connectionString.Connect,
                 replicaSetName: connectionString.ReplicaSet);
 
             _serverFactory = new MockClusterableServerFactory();
-            _clusterListener = Substitute.For<IClusterListener>();
-            return new ClusterFactory(settings, _serverFactory, _clusterListener)
+            _eventSubscriber = Substitute.For<IEventSubscriber>();
+            return new ClusterFactory(settings, _serverFactory, _eventSubscriber)
                 .CreateCluster();
         }
 

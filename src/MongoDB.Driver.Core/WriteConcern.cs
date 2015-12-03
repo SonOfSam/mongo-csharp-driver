@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+﻿/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -15,9 +15,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using MongoDB.Bson;
 using MongoDB.Driver.Core.Misc;
 using MongoDB.Shared;
@@ -104,6 +101,42 @@ namespace MongoDB.Driver
         {
             get { return __wMajority; }
         }
+
+        /// <summary>
+        /// Creates a write concern from a document.
+        /// </summary>
+        /// <param name="document">The document.</param>
+        /// <returns>A write concern.</returns>
+        public static WriteConcern FromBsonDocument(BsonDocument document)
+        {
+            var writeConcern = WriteConcern.Acknowledged;
+
+            BsonValue w;
+            if (document.TryGetValue("w", out w))
+            {
+                writeConcern = writeConcern.With(w: WriteConcern.WValue.Parse(w.ToString()));
+            }
+
+            BsonValue wTimeout;
+            if (document.TryGetValue("wtimeout", out wTimeout))
+            {
+                writeConcern = writeConcern.With(wTimeout: TimeSpan.FromMilliseconds(wTimeout.ToDouble()));
+            }
+
+            BsonValue fsync;
+            if (document.TryGetValue("fsync", out fsync))
+            {
+                writeConcern = writeConcern.With(fsync: fsync.ToBoolean());
+            }
+
+            BsonValue j;
+            if (document.TryGetValue("j", out j))
+            {
+                writeConcern = writeConcern.With(journal: j.ToBoolean());
+            }
+
+            return writeConcern;
+        }
         #endregion
 
         // fields
@@ -125,7 +158,7 @@ namespace MongoDB.Driver
             Optional<TimeSpan?> wTimeout = default(Optional<TimeSpan?>),
             Optional<bool?> fsync = default(Optional<bool?>),
             Optional<bool?> journal = default(Optional<bool?>))
-            : this(new Optional<WValue>(Ensure.IsGreaterThanOrEqualToZero(w, "w")), wTimeout, fsync, journal)
+            : this(new WCount(Ensure.IsGreaterThanOrEqualToZero(w, nameof(w))), wTimeout, fsync, journal)
         {
         }
 
@@ -141,7 +174,7 @@ namespace MongoDB.Driver
             Optional<TimeSpan?> wTimeout = default(Optional<TimeSpan?>),
             Optional<bool?> fsync = default(Optional<bool?>),
             Optional<bool?> journal = default(Optional<bool?>))
-            : this(new Optional<WValue>(Ensure.IsNotNullOrEmpty(mode, "mode")), wTimeout, fsync, journal)
+            : this(new WMode(Ensure.IsNotNullOrEmpty(mode, nameof(mode))), wTimeout, fsync, journal)
         {
         }
 
@@ -186,11 +219,29 @@ namespace MongoDB.Driver
         {
             get
             {
-                return
-                    (_w == null || !_w.Equals((WValue)0)) ||
-                    _wTimeout.HasValue ||
-                    _fsync.HasValue ||
-                    _journal.HasValue;
+                if (_w == null || !_w.Equals((WValue)0))
+                {
+                    return true;
+                }
+
+                return _journal.GetValueOrDefault(false) || _fsync.GetValueOrDefault(false);
+            }
+        }
+
+        /// <summary>
+        /// Gets a value indicating whether this write concern will use the default on the server.
+        /// </summary>
+        /// <value>
+        /// <c>true</c> if this instance is the default; otherwise, <c>false</c>.
+        /// </value>
+        public bool IsServerDefault
+        {
+            get
+            {
+                return _w == null &&
+                    !_wTimeout.HasValue &&
+                    !_fsync.HasValue &&
+                    !_journal.HasValue;
             }
         }
 
@@ -297,7 +348,7 @@ namespace MongoDB.Driver
             }
             if (_fsync != null)
             {
-                parts.Add(string.Format("fsync : {0}", _fsync.Value ? "true" : "false" ));
+                parts.Add(string.Format("fsync : {0}", _fsync.Value ? "true" : "false"));
             }
             if (_journal != null)
             {
@@ -476,7 +527,7 @@ namespace MongoDB.Driver
             /// <param name="w">The w value.</param>
             public WCount(int w)
             {
-                _value = Ensure.IsGreaterThanOrEqualToZero(w, "w");
+                _value = Ensure.IsGreaterThanOrEqualToZero(w, nameof(w));
             }
 
             // properties
@@ -517,7 +568,7 @@ namespace MongoDB.Driver
             /// <inheritdoc/>
             public override BsonValue ToBsonValue()
             {
-                return new BsonInt32(_value);
+                return (BsonInt32)_value;
             }
 
             /// <inheritdoc/>
@@ -559,7 +610,7 @@ namespace MongoDB.Driver
             /// <param name="mode">The mode.</param>
             public WMode(string mode)
             {
-                _value = Ensure.IsNotNullOrEmpty(mode, "mode");
+                _value = Ensure.IsNotNullOrEmpty(mode, nameof(mode));
             }
 
             // properties

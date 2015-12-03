@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -132,7 +132,7 @@ namespace MongoDB.Driver.Core.Configuration
         {
             return new SslStreamSettings(
                 checkCertificateRevocation: checkCertificateRevocation.WithDefault(_checkCertificateRevocation),
-                clientCertificates: Optional.Create(clientCertificates.WithDefault(_clientCertificates)),
+                clientCertificates: Optional.Enumerable(clientCertificates.WithDefault(_clientCertificates)),
                 clientCertificateSelectionCallback: clientCertificateSelectionCallback.WithDefault(_clientCertificateSelectionCallback),
                 enabledProtocols: enabledProtocols.WithDefault(_enabledSslProtocols),
                 serverCertificateValidationCallback: serverCertificateValidationCallback.WithDefault(_serverCertificateValidationCallback));

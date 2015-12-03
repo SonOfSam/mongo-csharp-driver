@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -23,12 +23,13 @@ using NUnit.Framework;
 namespace MongoDB.Driver.Tests
 {
     [TestFixture]
+    [Category("ConnectionString")]
     public class MongoUrlTests
     {
         [Test]
         public void TestAll()
         {
-            var readPreference = new ReadPreference(ReadPreferenceMode.Secondary, new[] { new TagSet(new [] { new Tag("dc", "1") }) });
+            var readPreference = new ReadPreference(ReadPreferenceMode.Secondary, new[] { new TagSet(new[] { new Tag("dc", "1") }) });
             var authMechanismProperties = new Dictionary<string, string>
             {
                 { "SERVICE_NAME", "other" },
@@ -51,10 +52,12 @@ namespace MongoDB.Driver.Tests
                 MaxConnectionPoolSize = 4,
                 MinConnectionPoolSize = 5,
                 Password = "password",
+                ReadConcernLevel = ReadConcernLevel.Majority,
                 ReadPreference = readPreference,
                 ReplicaSetName = "name",
                 LocalThreshold = TimeSpan.FromSeconds(6),
                 Server = new MongoServerAddress("host"),
+                ServerSelectionTimeout = TimeSpan.FromSeconds(10),
                 SocketTimeout = TimeSpan.FromSeconds(7),
                 Username = "username",
                 UseSsl = true,
@@ -74,6 +77,7 @@ namespace MongoDB.Driver.Tests
                 "sslVerifyCertificate=false", // VerifySslCertificate
                 "connect=replicaSet",
                 "replicaSet=name",
+                "readConcernLevel=majority",
                 "readPreference=secondary;readPreferenceTags=dc:1",
                 "fsync=true",
                 "journal=true",
@@ -85,6 +89,7 @@ namespace MongoDB.Driver.Tests
                 "maxPoolSize=4",
                 "minPoolSize=5",
                 "localThreshold=6s",
+                "serverSelectionTimeout=10s",
                 "socketTimeout=7s",
                 "waitQueueSize=123",
                 "waitQueueTimeout=8s",
@@ -109,10 +114,12 @@ namespace MongoDB.Driver.Tests
                 Assert.AreEqual(4, url.MaxConnectionPoolSize);
                 Assert.AreEqual(5, url.MinConnectionPoolSize);
                 Assert.AreEqual("password", url.Password);
+                Assert.AreEqual(ReadConcernLevel.Majority, url.ReadConcernLevel);
                 Assert.AreEqual(readPreference, url.ReadPreference);
                 Assert.AreEqual("name", url.ReplicaSetName);
                 Assert.AreEqual(TimeSpan.FromSeconds(6), url.LocalThreshold);
                 Assert.AreEqual(new MongoServerAddress("host", 27017), url.Server);
+                Assert.AreEqual(TimeSpan.FromSeconds(10), url.ServerSelectionTimeout);
                 Assert.AreEqual(TimeSpan.FromSeconds(7), url.SocketTimeout);
                 Assert.AreEqual("username", url.Username);
                 Assert.AreEqual(true, url.UseSsl);

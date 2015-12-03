@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ using MongoDB.Bson;
 using MongoDB.Bson.IO;
 using MongoDB.Driver.Core.Bindings;
 using MongoDB.Driver.Core.Clusters;
+using MongoDB.Driver.Core.Misc;
 using MongoDB.Driver.Core.Operations;
 using MongoDB.Driver.Core.WireProtocol.Messages.Encoders;
 
@@ -80,7 +81,7 @@ namespace MongoDB.Driver
         /// <summary>
         /// Gets the cluster.
         /// </summary>
-        public ICluster Cluster
+        public override ICluster Cluster
         {
             get { return _cluster; }
         }
@@ -100,6 +101,18 @@ namespace MongoDB.Driver
 
         // public methods
         /// <inheritdoc/>
+        public sealed override void DropDatabase(string name, CancellationToken cancellationToken = default(CancellationToken))
+        {
+            var messageEncoderSettings = GetMessageEncoderSettings();
+            var operation = new DropDatabaseOperation(new DatabaseNamespace(name), messageEncoderSettings);
+
+            using (var binding = new WritableServerBinding(_cluster))
+            {
+                _operationExecutor.ExecuteWriteOperation(binding, operation, cancellationToken);
+            }
+        }
+
+        /// <inheritdoc/>
         public sealed override async Task DropDatabaseAsync(string name, CancellationToken cancellationToken = default(CancellationToken))
         {
             var messageEncoderSettings = GetMessageEncoderSettings();
@@ -107,7 +120,7 @@ namespace MongoDB.Driver
 
             using (var binding = new WritableServerBinding(_cluster))
             {
-                await _operationExecutor.ExecuteWriteOperationAsync(binding, operation, _settings.OperationTimeout, cancellationToken).ConfigureAwait(false);
+                await _operationExecutor.ExecuteWriteOperationAsync(binding, operation, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -120,7 +133,19 @@ namespace MongoDB.Driver
 
             settings.ApplyDefaultValues(_settings);
 
-            return new MongoDatabaseImpl(new DatabaseNamespace(name), settings, _cluster, _operationExecutor);
+            return new MongoDatabaseImpl(this, new DatabaseNamespace(name), settings, _cluster, _operationExecutor);
+        }
+
+        /// <inheritdoc/>
+        public sealed override IAsyncCursor<BsonDocument> ListDatabases(CancellationToken cancellationToken = default(CancellationToken))
+        {
+            var messageEncoderSettings = GetMessageEncoderSettings();
+            var operation = new ListDatabasesOperation(messageEncoderSettings);
+
+            using (var binding = new ReadPreferenceBinding(_cluster, _settings.ReadPreference))
+            {
+                return _operationExecutor.ExecuteReadOperation(binding, operation, cancellationToken);
+            }
         }
 
         /// <inheritdoc/>
@@ -131,7 +156,7 @@ namespace MongoDB.Driver
 
             using (var binding = new ReadPreferenceBinding(_cluster, _settings.ReadPreference))
             {
-                return await _operationExecutor.ExecuteReadOperationAsync(binding, operation, _settings.OperationTimeout, cancellationToken).ConfigureAwait(false);
+                return await _operationExecutor.ExecuteReadOperationAsync(binding, operation, cancellationToken).ConfigureAwait(false);
             }
         }
 

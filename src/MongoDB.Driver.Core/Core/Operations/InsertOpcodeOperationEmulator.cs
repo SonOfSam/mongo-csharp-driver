@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@ namespace MongoDB.Driver.Core.Operations
     internal class InsertOpcodeOperationEmulator<TDocument>
     {
         // fields
+        private bool? _bypassDocumentValidation;
         private readonly CollectionNamespace _collectionNamespace;
         private bool _continueOnError;
         private readonly BatchableSource<TDocument> _documentSource;
@@ -46,13 +47,19 @@ namespace MongoDB.Driver.Core.Operations
             BatchableSource<TDocument> documentSource,
             MessageEncoderSettings messageEncoderSettings)
         {
-            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, "collectionNamespace");
-            _serializer = Ensure.IsNotNull(serializer, "serializer");
-            _documentSource = Ensure.IsNotNull(documentSource, "documentSource");
+            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, nameof(collectionNamespace));
+            _serializer = Ensure.IsNotNull(serializer, nameof(serializer));
+            _documentSource = Ensure.IsNotNull(documentSource, nameof(documentSource));
             _messageEncoderSettings = messageEncoderSettings;
         }
 
         // properties
+        public bool? BypassDocumentValidation
+        {
+            get { return _bypassDocumentValidation; }
+            set { _bypassDocumentValidation = value; }
+        }
+
         public CollectionNamespace CollectionNamespace
         {
             get { return _collectionNamespace; }
@@ -69,34 +76,22 @@ namespace MongoDB.Driver.Core.Operations
             get { return _documentSource; }
         }
 
-        /// <summary>
-        /// Gets or sets the maximum number of documents in a batch.
-        /// </summary>
-        /// <value>
-        /// The maximum number of documents in a batch.
-        /// </value>
         public int? MaxBatchCount
         {
             get { return _maxBatchCount; }
-            set { _maxBatchCount = Ensure.IsNullOrGreaterThanZero(value, "value"); }
+            set { _maxBatchCount = Ensure.IsNullOrGreaterThanZero(value, nameof(value)); }
         }
 
-        /// <summary>
-        /// Gets or sets the maximum size of a document.
-        /// </summary>
-        /// <value>
-        /// The maximum size of a document.
-        /// </value>
         public int? MaxDocumentSize
         {
             get { return _maxDocumentSize; }
-            set { _maxDocumentSize = Ensure.IsNullOrGreaterThanZero(value, "value"); }
+            set { _maxDocumentSize = Ensure.IsNullOrGreaterThanZero(value, nameof(value)); }
         }
 
         public int? MaxMessageSize
         {
             get { return _maxMessageSize; }
-            set { _maxMessageSize = Ensure.IsNullOrGreaterThanZero(value, "value"); }
+            set { _maxMessageSize = Ensure.IsNullOrGreaterThanZero(value, nameof(value)); }
         }
 
         public MessageEncoderSettings MessageEncoderSettings
@@ -112,14 +107,53 @@ namespace MongoDB.Driver.Core.Operations
         public WriteConcern WriteConcern
         {
             get { return _writeConcern; }
-            set { _writeConcern = Ensure.IsNotNull(value, "value"); }
+            set { _writeConcern = Ensure.IsNotNull(value, nameof(value)); }
         }
 
-        // methods
+        // public methods
+        public WriteConcernResult Execute(IChannelHandle channel, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNull(channel, nameof(channel));
+
+            var operation = CreateOperation();
+            BulkWriteOperationResult result;
+            MongoBulkWriteOperationException exception = null;
+            try
+            {
+                result = operation.Execute(channel, cancellationToken);
+            }
+            catch (MongoBulkWriteOperationException ex)
+            {
+                result = ex.Result;
+                exception = ex;
+            }
+
+            return CreateResultOrThrow(channel, result, exception);
+        }
+
         public async Task<WriteConcernResult> ExecuteAsync(IChannelHandle channel, CancellationToken cancellationToken)
         {
-            Ensure.IsNotNull(channel, "channel");
+            Ensure.IsNotNull(channel, nameof(channel));
 
+            var operation = CreateOperation();
+            BulkWriteOperationResult result;
+            MongoBulkWriteOperationException exception = null;
+            try
+            {
+                result = await operation.ExecuteAsync(channel, cancellationToken).ConfigureAwait(false);
+            }
+            catch (MongoBulkWriteOperationException ex)
+            {
+                result = ex.Result;
+                exception = ex;
+            }
+
+            return CreateResultOrThrow(channel, result, exception);
+        }
+
+        // private methods
+        private BulkInsertOperation CreateOperation()
+        {
             var requests = _documentSource.GetRemainingItems().Select(d =>
             {
                 if (d == null)
@@ -129,8 +163,9 @@ namespace MongoDB.Driver.Core.Operations
 
                 return new InsertRequest(new BsonDocumentWrapper(d, _serializer));
             });
-            var operation = new BulkInsertOperation(_collectionNamespace, requests, _messageEncoderSettings)
+            return new BulkInsertOperation(_collectionNamespace, requests, _messageEncoderSettings)
             {
+                BypassDocumentValidation = _bypassDocumentValidation,
                 IsOrdered = !_continueOnError,
                 MaxBatchCount = _maxBatchCount,
                 MaxBatchLength = _maxMessageSize,
@@ -138,29 +173,20 @@ namespace MongoDB.Driver.Core.Operations
                 WriteConcern = _writeConcern,
                 // WriteSettings = ?
             };
+        }
 
-            BulkWriteOperationResult bulkWriteResult;
-            MongoBulkWriteOperationException bulkWriteException = null;
-            try
-            {
-                bulkWriteResult = await operation.ExecuteAsync(channel, cancellationToken).ConfigureAwait(false);
-            }
-            catch (MongoBulkWriteOperationException ex)
-            {
-                bulkWriteResult = ex.Result;
-                bulkWriteException = ex;
-            }
-
+        private WriteConcernResult CreateResultOrThrow(IChannel channel, BulkWriteOperationResult result, MongoBulkWriteOperationException exception)
+        {
             var converter = new BulkWriteOperationResultConverter();
-            if (bulkWriteException != null)
+            if (exception != null)
             {
-                throw converter.ToWriteConcernException(channel.ConnectionDescription.ConnectionId, bulkWriteException);
+                throw converter.ToWriteConcernException(channel.ConnectionDescription.ConnectionId, exception);
             }
             else
             {
                 if (_writeConcern.IsAcknowledged)
                 {
-                    return converter.ToWriteConcernResult(bulkWriteResult);
+                    return converter.ToWriteConcernResult(result);
                 }
                 else
                 {

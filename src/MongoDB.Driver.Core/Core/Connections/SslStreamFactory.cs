@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -34,49 +34,84 @@ namespace MongoDB.Driver.Core.Connections
 
         public SslStreamFactory(SslStreamSettings settings, IStreamFactory wrapped)
         {
-            _settings = Ensure.IsNotNull(settings, "settings");
-            _wrapped = Ensure.IsNotNull(wrapped, "wrapped");
+            _settings = Ensure.IsNotNull(settings, nameof(settings));
+            _wrapped = Ensure.IsNotNull(wrapped, nameof(wrapped));
+        }
+
+        // public methods
+        public Stream CreateStream(EndPoint endPoint, CancellationToken cancellationToken)
+        {
+            var stream = _wrapped.CreateStream(endPoint, cancellationToken);
+            try
+            {
+                var sslStream = CreateSslStream(stream);
+                var targetHost = GetTargetHost(endPoint);
+                var clientCertificates = new X509CertificateCollection(_settings.ClientCertificates.ToArray());
+                sslStream.AuthenticateAsClient(targetHost, clientCertificates, _settings.EnabledSslProtocols, _settings.CheckCertificateRevocation);
+                return sslStream;
+            }
+            catch
+            {
+                DisposeStreamIgnoringExceptions(stream);
+                throw;
+            }
         }
 
         public async Task<Stream> CreateStreamAsync(EndPoint endPoint, CancellationToken cancellationToken)
         {
             var stream = await _wrapped.CreateStreamAsync(endPoint, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var sslStream = CreateSslStream(stream);
+                var targetHost = GetTargetHost(endPoint);
+                var clientCertificates = new X509CertificateCollection(_settings.ClientCertificates.ToArray());
+                await sslStream.AuthenticateAsClientAsync(targetHost, clientCertificates, _settings.EnabledSslProtocols, _settings.CheckCertificateRevocation).ConfigureAwait(false);
+                return sslStream;
+            }
+            catch
+            {
+                DisposeStreamIgnoringExceptions(stream);
+                throw;
+            }
+        }
 
-            var sslStream = new SslStream(
+        // private methods
+        private SslStream CreateSslStream(Stream stream)
+        {
+            return new SslStream(
                 stream,
                 leaveInnerStreamOpen: false,
                 userCertificateValidationCallback: _settings.ServerCertificateValidationCallback,
                 userCertificateSelectionCallback: _settings.ClientCertificateSelectionCallback);
+        }
 
-            string targetHost;
-            DnsEndPoint dnsEndPoint;
-            IPEndPoint ipEndPoint;
-            if ((dnsEndPoint = endPoint as DnsEndPoint) != null)
-            {
-                targetHost = dnsEndPoint.Host;
-            }
-            else if ((ipEndPoint = endPoint as IPEndPoint) != null)
-            {
-                targetHost = ipEndPoint.Address.ToString();
-            }
-            else
-            {
-                targetHost = endPoint.ToString();
-            }
-
-            var clientCertificates = new X509CertificateCollection(_settings.ClientCertificates.ToArray());
-
+        private void DisposeStreamIgnoringExceptions(Stream stream)
+        {
             try
             {
-                await sslStream.AuthenticateAsClientAsync(targetHost, clientCertificates, _settings.EnabledSslProtocols, _settings.CheckCertificateRevocation).ConfigureAwait(false);
+                stream.Dispose();
             }
             catch
             {
-                stream.Close();
-                stream.Dispose();
-                throw;
+                // ignore exception
             }
-            return sslStream;
+        }
+
+        private string GetTargetHost(EndPoint endPoint)
+        {
+            DnsEndPoint dnsEndPoint;
+            if ((dnsEndPoint = endPoint as DnsEndPoint) != null)
+            {
+                return dnsEndPoint.Host;
+            }
+
+            IPEndPoint ipEndPoint;
+            if ((ipEndPoint = endPoint as IPEndPoint) != null)
+            {
+                return ipEndPoint.Address.ToString();
+            }
+
+            return endPoint.ToString();
         }
     }
 }

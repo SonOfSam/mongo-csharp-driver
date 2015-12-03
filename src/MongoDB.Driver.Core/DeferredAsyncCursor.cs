@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ namespace MongoDB.Driver
     public sealed class DeferredAsyncCursor<TDocument> : IAsyncCursor<TDocument>
     {
         // fields
+        private readonly Func<CancellationToken, IAsyncCursor<TDocument>> _execute;
         private readonly Func<CancellationToken, Task<IAsyncCursor<TDocument>>> _executeAsync;
         private IAsyncCursor<TDocument> _cursor;
         private bool _disposed;
@@ -36,10 +37,14 @@ namespace MongoDB.Driver
         /// <summary>
         /// Initializes a new instance of the <see cref="DeferredAsyncCursor{TDocument}"/> class.
         /// </summary>
+        /// <param name="execute">The delegate to execute the first time MoveNext is called.</param>
         /// <param name="executeAsync">The delegate to execute the first time MoveNextAsync is called.</param>
-        public DeferredAsyncCursor(Func<CancellationToken, Task<IAsyncCursor<TDocument>>> executeAsync)
+        public DeferredAsyncCursor(
+            Func<CancellationToken, IAsyncCursor<TDocument>> execute,
+            Func<CancellationToken, Task<IAsyncCursor<TDocument>>> executeAsync)
         {
-            _executeAsync = Ensure.IsNotNull(executeAsync, "executeAsync");
+            _execute = Ensure.IsNotNull(execute, nameof(execute));
+            _executeAsync = Ensure.IsNotNull(executeAsync, nameof(executeAsync));
         }
 
         // properties
@@ -59,6 +64,19 @@ namespace MongoDB.Driver
         }
 
         // methods
+        /// <inheritdoc/>
+        public bool MoveNext(CancellationToken cancellationToken)
+        {
+            ThrowIfDisposed();
+
+            if (_cursor == null)
+            {
+                _cursor = _execute(cancellationToken);
+            }
+
+            return _cursor.MoveNext(cancellationToken);
+        }
+
         /// <inheritdoc/>
         public async Task<bool> MoveNextAsync(CancellationToken cancellationToken)
         {
@@ -85,7 +103,7 @@ namespace MongoDB.Driver
 
         private void ThrowIfDisposed()
         {
-            if(_disposed)
+            if (_disposed)
             {
                 throw new ObjectDisposedException(GetType().Name);
             }

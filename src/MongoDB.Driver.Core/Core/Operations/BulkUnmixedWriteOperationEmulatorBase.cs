@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+﻿/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -13,15 +13,11 @@
 * limitations under the License.
 */
 
-using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using MongoDB.Bson;
 using MongoDB.Driver.Core.Bindings;
-using MongoDB.Driver.Core.Connections;
 using MongoDB.Driver.Core.Misc;
-using MongoDB.Driver.Core.WireProtocol;
 using MongoDB.Driver.Core.WireProtocol.Messages.Encoders;
 
 namespace MongoDB.Driver.Core.Operations
@@ -43,8 +39,8 @@ namespace MongoDB.Driver.Core.Operations
             IEnumerable<WriteRequest> requests,
             MessageEncoderSettings messageEncoderSettings)
         {
-            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, "collectionNamespace");
-            _requests = Ensure.IsNotNull(requests, "requests");
+            _collectionNamespace = Ensure.IsNotNull(collectionNamespace, nameof(collectionNamespace));
+            _requests = Ensure.IsNotNull(requests, nameof(requests));
             _messageEncoderSettings = messageEncoderSettings;
         }
 
@@ -57,13 +53,13 @@ namespace MongoDB.Driver.Core.Operations
         public int? MaxBatchCount
         {
             get { return _maxBatchCount; }
-            set { _maxBatchCount = Ensure.IsNullOrGreaterThanZero(value, "value"); }
+            set { _maxBatchCount = Ensure.IsNullOrGreaterThanZero(value, nameof(value)); }
         }
 
         public int? MaxBatchLength
         {
             get { return _maxBatchLength; }
-            set { _maxBatchLength = Ensure.IsNullOrGreaterThanZero(value, "value"); }
+            set { _maxBatchLength = Ensure.IsNullOrGreaterThanZero(value, nameof(value)); }
         }
 
         public MessageEncoderSettings MessageEncoderSettings
@@ -85,11 +81,54 @@ namespace MongoDB.Driver.Core.Operations
         public WriteConcern WriteConcern
         {
             get { return _writeConcern; }
-            set { _writeConcern = Ensure.IsNotNull(value, "value"); }
+            set { _writeConcern = Ensure.IsNotNull(value, nameof(value)); }
         }
 
-        // methods
-        protected virtual async Task<BulkWriteBatchResult> EmulateSingleRequestAsync(IChannelHandle channel, WriteRequest request, int originalIndex, CancellationToken cancellationToken)
+        // public methods
+        public BulkWriteOperationResult Execute(IChannelHandle channel, CancellationToken cancellationToken)
+        {
+            var helper = new BatchHelper(this, channel);
+            foreach (var batch in helper.GetBatches())
+            {
+                batch.Result = EmulateSingleRequest(channel, batch.Request, batch.OriginalIndex, cancellationToken);
+            }
+            return helper.GetFinalResultOrThrow();
+        }
+
+        public async Task<BulkWriteOperationResult> ExecuteAsync(IChannelHandle channel, CancellationToken cancellationToken)
+        {
+            var helper = new BatchHelper(this, channel);
+            foreach (var batch in helper.GetBatches())
+            {
+                batch.Result = await EmulateSingleRequestAsync(channel, batch.Request, batch.OriginalIndex, cancellationToken).ConfigureAwait(false);
+            }
+            return helper.GetFinalResultOrThrow();
+        }
+
+        // protected methods
+        protected abstract WriteConcernResult ExecuteProtocol(IChannelHandle channel, WriteRequest request, CancellationToken cancellationToken);
+
+        protected abstract Task<WriteConcernResult> ExecuteProtocolAsync(IChannelHandle channel, WriteRequest request, CancellationToken cancellationToken);
+
+        // private methods
+        private BulkWriteBatchResult EmulateSingleRequest(IChannelHandle channel, WriteRequest request, int originalIndex, CancellationToken cancellationToken)
+        {
+            WriteConcernResult writeConcernResult = null;
+            MongoWriteConcernException writeConcernException = null;
+            try
+            {
+                writeConcernResult = ExecuteProtocol(channel, request, cancellationToken);
+            }
+            catch (MongoWriteConcernException ex)
+            {
+                writeConcernResult = ex.WriteConcernResult;
+                writeConcernException = ex;
+            }
+
+            return CreateSingleRequestResult(request, originalIndex, writeConcernResult, writeConcernException);
+        }
+
+        private async Task<BulkWriteBatchResult> EmulateSingleRequestAsync(IChannelHandle channel, WriteRequest request, int originalIndex, CancellationToken cancellationToken)
         {
             WriteConcernResult writeConcernResult = null;
             MongoWriteConcernException writeConcernException = null;
@@ -103,6 +142,11 @@ namespace MongoDB.Driver.Core.Operations
                 writeConcernException = ex;
             }
 
+            return CreateSingleRequestResult(request, originalIndex, writeConcernResult, writeConcernException);
+        }
+
+        private BulkWriteBatchResult CreateSingleRequestResult(WriteRequest request, int originalIndex, WriteConcernResult writeConcernResult, MongoWriteConcernException writeConcernException)
+        {
             var indexMap = new IndexMap.RangeBased(0, originalIndex, 1);
             return BulkWriteBatchResult.Create(
                 request,
@@ -111,32 +155,53 @@ namespace MongoDB.Driver.Core.Operations
                 indexMap);
         }
 
-        public async Task<BulkWriteOperationResult> ExecuteAsync(IChannelHandle channel, CancellationToken cancellationToken)
+        // nested types
+        private class BatchHelper
         {
-            var batchResults = new List<BulkWriteBatchResult>();
-            var remainingRequests = new List<WriteRequest>();
-            var hasWriteErrors = false;
+            private readonly List<BulkWriteBatchResult> _batchResults = new List<BulkWriteBatchResult>();
+            private readonly IChannelHandle _channel;
+            private bool _hasWriteErrors;
+            private readonly BulkUnmixedWriteOperationEmulatorBase _operation;
+            private readonly List<WriteRequest> _remainingRequests = new List<WriteRequest>();
 
-            var originalIndex = 0;
-            foreach (WriteRequest request in _requests)
+            public BatchHelper(BulkUnmixedWriteOperationEmulatorBase operation, IChannelHandle channel)
             {
-                if (hasWriteErrors && _isOrdered)
-                {
-                    remainingRequests.Add(request);
-                    continue;
-                }
-
-                var batchResult = await EmulateSingleRequestAsync(channel, request, originalIndex, cancellationToken).ConfigureAwait(false);
-                batchResults.Add(batchResult);
-
-                hasWriteErrors |= batchResult.HasWriteErrors;
-                originalIndex++;
+                _operation = operation;
+                _channel = channel;
             }
 
-            var combiner = new BulkWriteBatchResultCombiner(batchResults, _writeConcern.IsAcknowledged);
-            return combiner.CreateResultOrThrowIfHasErrors(channel.ConnectionDescription.ConnectionId, remainingRequests);
-        }
+            public IEnumerable<Batch> GetBatches()
+            {
+                var originalIndex = 0;
+                foreach (WriteRequest request in _operation._requests)
+                {
+                    if (_hasWriteErrors && _operation._isOrdered)
+                    {
+                        _remainingRequests.Add(request);
+                        continue;
+                    }
 
-        protected abstract Task<WriteConcernResult> ExecuteProtocolAsync(IChannelHandle channel, WriteRequest request, CancellationToken cancellationToken);
+                    var batch = new Batch { Request = request, OriginalIndex = originalIndex };
+                    yield return batch;
+                    _batchResults.Add(batch.Result);
+
+                    _hasWriteErrors |= batch.Result.HasWriteErrors;
+                    originalIndex++;
+                }
+            }
+
+            public BulkWriteOperationResult GetFinalResultOrThrow()
+            {
+                var combiner = new BulkWriteBatchResultCombiner(_batchResults, _operation._writeConcern.IsAcknowledged);
+                return combiner.CreateResultOrThrowIfHasErrors(_channel.ConnectionDescription.ConnectionId, _remainingRequests);
+            }
+
+            public class Batch
+            {
+                public int OriginalIndex;
+                public WriteRequest Request;
+                public BulkWriteBatchResult Result;
+            }
+        }
     }
 }

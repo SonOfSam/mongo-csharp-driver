@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -59,6 +59,18 @@ namespace MongoDB.Bson.IO
             _jsonWriterSettings = settings; // already frozen by base class
             _context = new JsonWriterContext(null, ContextType.TopLevel, "");
             State = BsonWriterState.Initial;
+        }
+
+        // public properties
+        /// <summary>
+        /// Gets the base TextWriter.
+        /// </summary>
+        /// <value>
+        /// The base TextWriter.
+        /// </value>
+        public TextWriter BaseTextWriter
+        {
+            get { return _textWriter; }
         }
 
         // public methods
@@ -455,7 +467,7 @@ namespace MongoDB.Bson.IO
                 ThrowInvalidState("WriteObjectId", BsonWriterState.Value, BsonWriterState.Initial);
             }
 
-            var bytes = ObjectId.Pack(objectId.Timestamp, objectId.Machine, objectId.Pid, objectId.Increment);
+            var bytes = objectId.ToByteArray();
 
             WriteNameHelper(Name);
             switch (_jsonWriterSettings.OutputMode)
@@ -655,7 +667,6 @@ namespace MongoDB.Bson.IO
                     Close();
                 }
                 catch { } // ignore exceptions
-                _textWriter.Dispose();
             }
             base.Dispose(disposing);
         }
@@ -718,7 +729,7 @@ namespace MongoDB.Bson.IO
 
         private BsonWriterState GetNextState()
         {
-            if (_context.ContextType == ContextType.Array)
+            if (_context.ContextType == ContextType.Array || _context.ContextType == ContextType.TopLevel)
             {
                 return BsonWriterState.Value;
             }

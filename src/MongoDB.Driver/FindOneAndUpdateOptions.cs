@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -26,19 +26,20 @@ namespace MongoDB.Driver
     /// Options for a findAndModify command to update an object.
     /// </summary>
     /// <typeparam name="TDocument">The type of the document.</typeparam>
-    /// <typeparam name="TResult">The type of the result.</typeparam>
-    public class FindOneAndUpdateOptions<TDocument, TResult>
+    /// <typeparam name="TProjection">The type of the projection (same as TDocument if there is no projection).</typeparam>
+    public class FindOneAndUpdateOptions<TDocument, TProjection>
     {
         // fields
+        private bool? _bypassDocumentValidation;
         private bool _isUpsert;
         private TimeSpan? _maxTime;
-        private ProjectionDefinition<TDocument, TResult> _projection;
+        private ProjectionDefinition<TDocument, TProjection> _projection;
         private ReturnDocument _returnDocument;
         private SortDefinition<TDocument> _sort;
 
         // constructors
         /// <summary>
-        /// Initializes a new instance of the <see cref="FindOneAndUpdateOptions{TDocument, TResult}"/> class.
+        /// Initializes a new instance of the <see cref="FindOneAndUpdateOptions{TDocument, TProjection}"/> class.
         /// </summary>
         public FindOneAndUpdateOptions()
         {
@@ -46,6 +47,15 @@ namespace MongoDB.Driver
         }
 
         // properties
+        /// <summary>
+        /// Gets or sets a value indicating whether to bypass document validation.
+        /// </summary>
+        public bool? BypassDocumentValidation
+        {
+            get { return _bypassDocumentValidation; }
+            set { _bypassDocumentValidation = value; }
+        }
+
         /// <summary>
         /// Gets or sets a value indicating whether to insert the document if it doesn't already exist.
         /// </summary>
@@ -67,7 +77,7 @@ namespace MongoDB.Driver
         /// <summary>
         /// Gets or sets the projection.
         /// </summary>
-        public ProjectionDefinition<TDocument, TResult> Projection
+        public ProjectionDefinition<TDocument, TProjection> Projection
         {
             get { return _projection; }
             set { _projection = value; }

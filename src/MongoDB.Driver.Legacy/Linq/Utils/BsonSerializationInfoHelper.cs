@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -89,13 +89,9 @@ namespace MongoDB.Driver.Linq.Utils
         {
             itemSerializationInfo = null;
             var arraySerializer = serializationInfo.Serializer as IBsonArraySerializer;
-            if (arraySerializer != null)
+            if (arraySerializer != null && arraySerializer.TryGetItemSerializationInfo(out itemSerializationInfo))
             {
-                itemSerializationInfo = arraySerializer.GetItemSerializationInfo();
-                if (itemSerializationInfo != null)
-                {
-                    return true;
-                }
+                return true;
             }
 
             return false;

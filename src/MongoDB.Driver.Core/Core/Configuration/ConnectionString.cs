@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -56,9 +56,11 @@ namespace MongoDB.Driver.Core.Configuration
         private int? _maxPoolSize;
         private int? _minPoolSize;
         private string _password;
+        private ReadConcernLevel? _readConcernLevel;
         private ReadPreferenceMode? _readPreference;
         private IReadOnlyList<TagSet> _readPreferenceTags;
         private string _replicaSet;
+        private TimeSpan? _serverSelectionTimeout;
         private TimeSpan? _socketTimeout;
         private bool? _ssl;
         private bool? _sslVerifyCertificate;
@@ -77,7 +79,7 @@ namespace MongoDB.Driver.Core.Configuration
         /// <param name="connectionString">The connection string.</param>
         public ConnectionString(string connectionString)
         {
-            _originalConnectionString = Ensure.IsNotNull(connectionString, "connectionString");
+            _originalConnectionString = Ensure.IsNotNull(connectionString, nameof(connectionString));
 
             _allOptions = new NameValueCollection(StringComparer.InvariantCultureIgnoreCase);
             _unknownOptions = new NameValueCollection(StringComparer.InvariantCultureIgnoreCase);
@@ -231,6 +233,17 @@ namespace MongoDB.Driver.Core.Configuration
         }
 
         /// <summary>
+        /// Gets the read concern level.
+        /// </summary>
+        /// <value>
+        /// The read concern level.
+        /// </value>
+        public ReadConcernLevel? ReadConcernLevel
+        {
+            get { return _readConcernLevel; }
+        }
+
+        /// <summary>
         /// Gets the read preference.
         /// </summary>
         public ReadPreferenceMode? ReadPreference
@@ -252,6 +265,14 @@ namespace MongoDB.Driver.Core.Configuration
         public IReadOnlyList<TagSet> ReadPreferenceTags
         {
             get { return _readPreferenceTags; }
+        }
+
+        /// <summary>
+        /// Gets the server selection timeout.
+        /// </summary>
+        public TimeSpan? ServerSelectionTimeout
+        {
+            get { return _serverSelectionTimeout; }
         }
 
         /// <summary>
@@ -357,7 +378,7 @@ namespace MongoDB.Driver.Core.Configuration
             var databaseGroup = match.Groups["database"];
             if (databaseGroup.Success)
             {
-                _databaseName = databaseGroup.Value;
+                _databaseName = Uri.UnescapeDataString(databaseGroup.Value);
             }
         }
 
@@ -386,7 +407,7 @@ namespace MongoDB.Driver.Core.Configuration
             {
                 var parts = option.Value.Split('=');
                 _allOptions.Add(parts[0], parts[1]);
-                ParseOption(parts[0].Trim(), parts[1].Trim());
+                ParseOption(parts[0].Trim(), Uri.UnescapeDataString(parts[1].Trim()));
             }
         }
 
@@ -407,14 +428,15 @@ namespace MongoDB.Driver.Core.Configuration
 
         private void Parse()
         {
-            const string serverPattern = @"(?<host>((\[[^]]+?\]|[^:,/?#]+)(:\d+)?))";
+            const string serverPattern = @"(?<host>((\[[^]]+?\]|[^:@,/?#]+)(:\d+)?))";
+            const string serversPattern = serverPattern + @"(," + serverPattern + ")*";
+            const string databasePattern = @"(?<database>[^/?]+)";
             const string optionPattern = @"(?<option>[^&;]+=[^&;]+)";
+            const string optionsPattern = @"(\?" + optionPattern + @"((&|;)" + optionPattern + ")*)?";
             const string pattern =
                 @"^mongodb://" +
-                @"((?<username>[^:@]+)(:(?<password>[^@]*))?@)?" +
-                serverPattern + @"(," + serverPattern + ")*" +
-                @"(/(?<database>[^/?]+))?" +
-                @"/?(\?" + optionPattern + @"((&|;)" + optionPattern + ")*)?$";
+                @"((?<username>[^:@]+)(:(?<password>[^:@]*))?@)?" +
+                serversPattern + @"(/" + databasePattern + ")?/?" + optionsPattern + "$";
 
             var match = Regex.Match(_originalConnectionString, pattern);
             if (!match.Success)
@@ -479,6 +501,9 @@ namespace MongoDB.Driver.Core.Configuration
                 case "minpoolsize":
                     _minPoolSize = ParseInt32(name, value);
                     break;
+                case "readconcernlevel":
+                    _readConcernLevel = ParseEnum<ReadConcernLevel>(name, value);
+                    break;
                 case "readpreference":
                     _readPreference = ParseEnum<ReadPreferenceMode>(name, value);
                     break;
@@ -534,6 +559,10 @@ namespace MongoDB.Driver.Core.Configuration
                         ReadPreferenceMode.SecondaryPreferred :
                         ReadPreferenceMode.Primary;
                     break;
+                case "serverselectiontimeout":
+                case "serverselectiontimeoutms":
+                    _serverSelectionTimeout = ParseTimeSpan(name, value);
+                    break;
                 case "sockettimeout":
                 case "sockettimeoutms":
                     _socketTimeout = ParseTimeSpan(name, value);
@@ -554,6 +583,10 @@ namespace MongoDB.Driver.Core.Configuration
                 case "wtimeout":
                 case "wtimeoutms":
                     _wTimeout = ParseTimeSpan(name, value);
+                    if (_wTimeout < TimeSpan.Zero)
+                    {
+                        throw new MongoConfigurationException($"{name} must be greater than or equal to 0.");
+                    }
                     break;
                 case "waitqueuemultiple":
                     _waitQueueMultiple = ParseDouble(name, value);

@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -43,9 +43,9 @@ namespace MongoDB.Driver.Core.Bindings
         /// <param name="readPreference">The read preference.</param>
         public ChannelReadBinding(IServer server, IChannelHandle channel, ReadPreference readPreference)
         {
-            _server = Ensure.IsNotNull(server, "server");
-            _channel = Ensure.IsNotNull(channel, "channel");
-            _readPreference = Ensure.IsNotNull(readPreference, "readPreference");
+            _server = Ensure.IsNotNull(server, nameof(server));
+            _channel = Ensure.IsNotNull(channel, nameof(channel));
+            _readPreference = Ensure.IsNotNull(readPreference, nameof(readPreference));
         }
 
         // properties        
@@ -68,10 +68,22 @@ namespace MongoDB.Driver.Core.Bindings
         }
 
         /// <inheritdoc/>
+        public IChannelSourceHandle GetReadChannelSource(CancellationToken cancellationToken)
+        {
+            ThrowIfDisposed();
+            return GetReadChannelSourceHelper();
+        }
+
+        /// <inheritdoc/>
         public Task<IChannelSourceHandle> GetReadChannelSourceAsync(CancellationToken cancellationToken)
         {
             ThrowIfDisposed();
-            return Task.FromResult<IChannelSourceHandle>(new ChannelSourceHandle(new ChannelChannelSource(_server, _channel.Fork())));
+            return Task.FromResult<IChannelSourceHandle>(GetReadChannelSourceHelper());
+        }
+
+        private IChannelSourceHandle GetReadChannelSourceHelper()
+        {
+            return new ChannelSourceHandle(new ChannelChannelSource(_server, _channel.Fork()));
         }
 
         private void ThrowIfDisposed()

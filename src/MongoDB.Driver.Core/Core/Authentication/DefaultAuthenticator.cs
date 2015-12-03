@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -26,9 +26,6 @@ namespace MongoDB.Driver.Core.Authentication
     /// </summary>
     public class DefaultAuthenticator : IAuthenticator
     {
-        // static
-        private static readonly SemanticVersion __scramVersionRequirement = new SemanticVersion(2, 7, 5);
-
         // fields
         private readonly UsernamePasswordCredential _credential;
         private readonly IRandomStringGenerator _randomStringGenerator;
@@ -45,8 +42,8 @@ namespace MongoDB.Driver.Core.Authentication
 
         internal DefaultAuthenticator(UsernamePasswordCredential credential, IRandomStringGenerator randomStringGenerator)
         {
-            _credential = Ensure.IsNotNull(credential, "credential");
-            _randomStringGenerator = Ensure.IsNotNull(randomStringGenerator, "randomStringGenerator");
+            _credential = Ensure.IsNotNull(credential, nameof(credential));
+            _randomStringGenerator = Ensure.IsNotNull(randomStringGenerator, nameof(randomStringGenerator));
         }
 
         // properties
@@ -58,22 +55,35 @@ namespace MongoDB.Driver.Core.Authentication
 
         // methods
         /// <inheritdoc/>
+        public void Authenticate(IConnection connection, ConnectionDescription description, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNull(connection, nameof(connection));
+            Ensure.IsNotNull(description, nameof(description));
+
+            var authenticator = CreateAuthenticator(description);
+            authenticator.Authenticate(connection, description, cancellationToken);
+        }
+
+        /// <inheritdoc/>
         public Task AuthenticateAsync(IConnection connection, ConnectionDescription description, CancellationToken cancellationToken)
         {
-            Ensure.IsNotNull(connection, "connection");
-            Ensure.IsNotNull(description, "description");
+            Ensure.IsNotNull(connection, nameof(connection));
+            Ensure.IsNotNull(description, nameof(description));
 
-            IAuthenticator authenticator;
-            if (description.BuildInfoResult.ServerVersion >= __scramVersionRequirement)
+            var authenticator = CreateAuthenticator(description);
+            return authenticator.AuthenticateAsync(connection, description, cancellationToken);
+        }
+
+        private IAuthenticator CreateAuthenticator(ConnectionDescription description)
+        {
+            if (SupportedFeatures.IsScramSha1AuthenticationSupported(description.ServerVersion))
             {
-                authenticator = new ScramSha1Authenticator(_credential, _randomStringGenerator);
+                return new ScramSha1Authenticator(_credential, _randomStringGenerator);
             }
             else
             {
-                authenticator = new MongoDBCRAuthenticator(_credential);
+                return new MongoDBCRAuthenticator(_credential);
             }
-
-            return authenticator.AuthenticateAsync(connection, description, cancellationToken);
         }
     }
 }

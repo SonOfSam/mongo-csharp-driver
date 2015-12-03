@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@ namespace MongoDB.Driver
 
         public SingleBatchAsyncCursor(IReadOnlyList<T> current)
         {
-            _current = Ensure.IsNotNull(current, "current");
+            _current = Ensure.IsNotNull(current, nameof(current));
         }
 
         public IEnumerable<T> Current
@@ -45,15 +45,22 @@ namespace MongoDB.Driver
             }
         }
 
-        public Task<bool> MoveNextAsync(CancellationToken cancellationToken)
+        // public methods
+        public bool MoveNext(CancellationToken cancellationToken)
         {
             ThrowIfDisposed();
             if (_moved)
             {
-                return Task.FromResult(false);
+                return false;
             }
             _moved = true;
-            return Task.FromResult(true);
+            return true;
+        }
+
+        public Task<bool> MoveNextAsync(CancellationToken cancellationToken)
+        {
+            ThrowIfDisposed();
+            return Task.FromResult(MoveNext(cancellationToken));
         }
 
         public void Dispose()
@@ -61,6 +68,7 @@ namespace MongoDB.Driver
             _disposed = true;
         }
 
+        // private methods
         private void ThrowIfDisposed()
         {
             if (_disposed)

@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -28,17 +28,10 @@ using MongoDB.Driver.Core.WireProtocol.Messages.Encoders;
 namespace MongoDB.Driver.Core.WireProtocol.Messages
 {
     /// <summary>
-    /// Represents the non-generic base class for a Reply message.
-    /// </summary>
-    public abstract class ReplyMessage : MongoDBMessage
-    {
-    }
-
-    /// <summary>
     /// Represents a Reply message.
     /// </summary>
     /// <typeparam name="TDocument">The type of the document.</typeparam>
-    public class ReplyMessage<TDocument> : ReplyMessage
+    public class ReplyMessage<TDocument> : ResponseMessage
     {
         // fields
         private readonly bool _awaitCapable;
@@ -48,8 +41,6 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages
         private readonly int _numberReturned;
         private readonly bool _queryFailure;
         private readonly BsonDocument _queryFailureDocument;
-        private readonly int _requestId;
-        private readonly int _responseTo;
         private readonly IBsonSerializer<TDocument> _serializer;
         private readonly int _startingFrom;
 
@@ -80,6 +71,7 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages
             int responseTo,
             IBsonSerializer<TDocument> serializer,
             int startingFrom)
+            : base(requestId, responseTo)
         {
             if (documents == null && queryFailureDocument == null && !cursorNotFound)
             {
@@ -96,9 +88,7 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages
             _numberReturned = numberReturned;
             _queryFailure = queryFailure;
             _queryFailureDocument = queryFailureDocument; // can be null
-            _requestId = requestId;
-            _responseTo = responseTo;
-            _serializer = Ensure.IsNotNull(serializer, "serializer");
+            _serializer = Ensure.IsNotNull(serializer, nameof(serializer));
             _startingFrom = startingFrom;
         }
 
@@ -106,9 +96,6 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages
         /// <summary>
         /// Gets a value indicating whether the server is await capable.
         /// </summary>
-        /// <value>
-        ///   <c>true</c> if the server is await capable; otherwise, <c>false</c>.
-        /// </value>
         public bool AwaitCapable
         {
             get { return _awaitCapable; }
@@ -117,9 +104,6 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages
         /// <summary>
         /// Gets the cursor identifier.
         /// </summary>
-        /// <value>
-        /// The cursor identifier.
-        /// </value>
         public long CursorId
         {
             get { return _cursorId; }
@@ -128,9 +112,6 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages
         /// <summary>
         /// Gets a value indicating whether the cursor was not found.
         /// </summary>
-        /// <value>
-        ///   <c>true</c> if the cursor was not found; otherwise, <c>false</c>.
-        /// </value>
         public bool CursorNotFound
         {
             get { return _cursorNotFound; }
@@ -139,20 +120,20 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages
         /// <summary>
         /// Gets the documents.
         /// </summary>
-        /// <value>
-        /// The documents.
-        /// </value>
         public List<TDocument> Documents
         {
             get { return _documents; }
         }
 
+        /// <inheritdoc/>
+        public override MongoDBMessageType MessageType
+        {
+            get { return MongoDBMessageType.Reply; }
+        }
+
         /// <summary>
         /// Gets the number of documents returned.
         /// </summary>
-        /// <value>
-        /// The number of documents returned.
-        /// </value>
         public int NumberReturned
         {
             get { return _numberReturned; }
@@ -161,9 +142,6 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages
         /// <summary>
         /// Gets a value indicating whether the query failed.
         /// </summary>
-        /// <value>
-        ///   <c>true</c> if the query failed; otherwise, <c>false</c>.
-        /// </value>
         public bool QueryFailure
         {
             get { return _queryFailure; }
@@ -172,42 +150,14 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages
         /// <summary>
         /// Gets the query failure document.
         /// </summary>
-        /// <value>
-        /// The query failure document (or null if QueryFailure is false).
-        /// </value>
         public BsonDocument QueryFailureDocument
         {
             get { return _queryFailureDocument; }
         }
 
         /// <summary>
-        /// Gets the request identifier.
-        /// </summary>
-        /// <value>
-        /// The request identifier.
-        /// </value>
-        public int RequestId
-        {
-            get { return _requestId; }
-        }
-
-        /// <summary>
-        /// Gets the identifier of the message this is a response to.
-        /// </summary>
-        /// <value>
-        /// The identifier of the message this is a response to.
-        /// </value>
-        public int ResponseTo
-        {
-            get { return _responseTo; }
-        }
-
-        /// <summary>
         /// Gets the serializer.
         /// </summary>
-        /// <value>
-        /// The serializer.
-        /// </value>
         public IBsonSerializer<TDocument> Serializer
         {
             get { return _serializer; }
@@ -216,9 +166,6 @@ namespace MongoDB.Driver.Core.WireProtocol.Messages
         /// <summary>
         /// Gets the position of the first document in this batch in the overall result.
         /// </summary>
-        /// <value>
-        /// The position of the first document in this batch in the overall result.
-        /// </value>
         public int StartingFrom
         {
             get { return _startingFrom; }

@@ -31,6 +31,9 @@
     <IsWebBootstrapper>false</IsWebBootstrapper>
     <UseApplicationTrust>false</UseApplicationTrust>
     <BootstrapperEnabled>true</BootstrapperEnabled>
+    <CodeAnalysisRuleSet>..\MongoDBLegacy.ruleset</CodeAnalysisRuleSet>
+    <RunCodeAnalysis>true</RunCodeAnalysis>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <TargetFrameworkProfile />
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
@@ -41,7 +44,6 @@
     <DefineConstants>DEBUG;TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
-    <CodeAnalysisRuleSet>..\CodeAnalysisRuleSet.ruleset</CodeAnalysisRuleSet>
     <DocumentationFile>bin\Debug\MongoDB.Bson.XML</DocumentationFile>
     <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
@@ -52,7 +54,6 @@
     <DefineConstants>TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
-    <CodeAnalysisRuleSet>AllRules.ruleset</CodeAnalysisRuleSet>
     <DocumentationFile>bin\Release\MongoDB.Bson.XML</DocumentationFile>
     <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
@@ -216,6 +217,7 @@
     <Compile Include="Serialization\Serializers\BsonBinaryDataSerializer.cs" />
     <Compile Include="Serialization\Serializers\BsonBooleanSerializer.cs" />
     <Compile Include="Serialization\IBsonSerializerExtensions.cs" />
+    <Compile Include="Serialization\Serializers\PartiallyRawBsonDocumentSerializer.cs" />
     <Compile Include="Serialization\Serializers\ProjectingDeserializer.cs" />
     <Compile Include="Serialization\Serializers\SerializerHelper.cs" />
     <Compile Include="Serialization\Serializers\DiscriminatedWrapperSerializer.cs" />
@@ -399,6 +401,12 @@
       <ProductName>Windows Installer 3.1</ProductName>
       <Install>true</Install>
     </BootstrapperPackage>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
+  </ItemGroup>
+  <ItemGroup>
+    <Analyzer Include="..\packages\AsyncUsageAnalyzers.1.0.0-alpha003\analyzers\dotnet\AsyncUsageAnalyzers.dll" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 

@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -17,99 +17,263 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
-using MongoDB.Driver.Linq.Expressions;
+using System.Reflection;
 
 namespace MongoDB.Driver.Linq.Processors
 {
-    internal static class PartialEvaluator
+    internal sealed class PartialEvaluator : ExpressionVisitor
     {
-        public static Expression Evaluate(Expression expression)
+        public static Expression Evaluate(Expression node)
         {
-            return Evaluate(expression, null);
+            var candidates = Nominator.Nominate(node);
+            var evaluator = new PartialEvaluator(candidates);
+            return evaluator.Visit(node);
         }
 
-        public static Expression Evaluate(Expression expression, IQueryProvider queryProvider)
+        private readonly HashSet<Expression> _candidates;
+
+        private PartialEvaluator(HashSet<Expression> candidates)
         {
-            return new SubtreeEvaluator(new Nominator(e => CanBeEvaluatedLocally(e, queryProvider)).Nominate(expression)).Evaluate(expression);
+            _candidates = candidates;
         }
 
-        private static bool CanBeEvaluatedLocally(Expression expression, IQueryProvider queryProvider)
+        public override Expression Visit(Expression node)
         {
-            // any operation on a query can't be done locally
-            var constantExpression = expression as ConstantExpression;
-            if (constantExpression != null)
+            if (node == null)
             {
-                var query = constantExpression.Value as IQueryable;
-                if (query != null && (queryProvider == null || query.Provider == queryProvider))
-                {
-                    return false;
-                }
+                return null;
+            }
+            if (!_candidates.Contains(node))
+            {
+                return base.Visit(node);
             }
 
-            var methodCallExpression = expression as MethodCallExpression;
-            if (methodCallExpression != null)
+            var evaluated = EvaluateSubtree(node);
+
+            if (evaluated != node)
             {
-                var declaringType = methodCallExpression.Method.DeclaringType;
-                if (declaringType == typeof(Enumerable) || declaringType == typeof(Queryable))
-                {
-                    return false;
-                }
+                return PartialEvaluator.Evaluate(evaluated);
             }
 
-            if (expression.NodeType == ExpressionType.Convert && expression.Type == typeof(object))
-            {
-                return true;
-            }
-
-            if (expression.NodeType == ExpressionType.Parameter || expression.NodeType == ExpressionType.Lambda)
-            {
-                return false;
-            }
-
-            return true;
+            return evaluated;
         }
 
-        private class SubtreeEvaluator : ExpressionVisitor
+        private Expression EvaluateSubtree(Expression subtree)
         {
-            HashSet<Expression> _candidates;
+            subtree = ReflectionEvaluator.Evaluate(subtree);
 
-            internal SubtreeEvaluator(HashSet<Expression> candidates)
+            if (subtree.NodeType == ExpressionType.Constant)
             {
-                _candidates = candidates;
+                // we don't want to partially evaluate constants...
+                var constant = (ConstantExpression)subtree;
+                var queryableValue = constant.Value as IQueryable;
+                if (queryableValue != null && queryableValue.Expression != constant)
+                {
+                    return queryableValue.Expression;
+                }
+
+                return subtree;
             }
 
-            internal Expression Evaluate(Expression exp)
+            Expression<Func<object>> lambda = Expression.Lambda<Func<object>>(Expression.Convert(subtree, typeof(object)));
+            var compiledLambda = lambda.Compile();
+            return Expression.Constant(compiledLambda(), subtree.Type);
+        }
+
+        private class Nominator : ExpressionVisitor
+        {
+            public static HashSet<Expression> Nominate(Expression node)
             {
-                return this.Visit(exp);
+                var nominator = new Nominator();
+                nominator.Visit(node);
+                return nominator._candidates;
             }
 
-            public override Expression Visit(Expression exp)
+            private HashSet<Expression> _candidates;
+            private bool _isBlocked;
+
+            private Nominator()
             {
-                if (exp == null)
+                _candidates = new HashSet<Expression>();
+            }
+
+            public override Expression Visit(Expression node)
+            {
+                if (node == null)
                 {
-                    return null;
+                    return base.Visit(node);
                 }
-                if (_candidates.Contains(exp))
+
+                bool _oldIsBlocked = _isBlocked;
+                _isBlocked = false;
+
+                var visited = base.Visit(node);
+
+                if (!_isBlocked)
                 {
-                    return this.EvaluateSubtree(exp);
+                    _candidates.Add(node);
                 }
-                return base.Visit(exp);
+
+                _isBlocked |= _oldIsBlocked;
+                return visited;
+            }
+
+            protected override Expression VisitListInit(ListInitExpression node)
+            {
+                Visit(node.Initializers, VisitElementInit);
+
+                if (_isBlocked)
+                {
+                    return node;
+                }
+
+                Visit(node.NewExpression);
+                return node;
+            }
+
+            protected override Expression VisitMember(MemberExpression node)
+            {
+                if (IsQueryableExpression(node.Expression))
+                {
+                    _isBlocked = true;
+                }
+
+                return base.VisitMember(node);
             }
 
             protected override Expression VisitMemberInit(MemberInitExpression node)
             {
+                Visit(node.Bindings, VisitMemberBinding);
+
+                if (_isBlocked)
+                {
+                    return node;
+                }
+
+                Visit(node.NewExpression);
                 return node;
             }
 
-            private Expression EvaluateSubtree(Expression e)
+            protected override Expression VisitMethodCall(MethodCallExpression node)
             {
-                if (e.NodeType == ExpressionType.Constant)
+                if (IsQueryableExpression(node.Object))
                 {
-                    return e;
+                    _isBlocked = true;
                 }
-                LambdaExpression lambda = Expression.Lambda(e);
-                Delegate fn = lambda.Compile();
-                return Expression.Constant(fn.DynamicInvoke(null), e.Type);
+
+                for (int i = 0; i < node.Arguments.Count && !_isBlocked; i++)
+                {
+                    if (IsQueryableExpression(node.Arguments[i]))
+                    {
+                        _isBlocked = true;
+                    }
+                }
+
+                return base.VisitMethodCall(node);
+            }
+
+            protected override Expression VisitParameter(ParameterExpression node)
+            {
+                _isBlocked = true;
+                return base.VisitParameter(node);
+            }
+
+            private static bool IsQueryableExpression(Expression node)
+            {
+                return node != null && typeof(IQueryable).IsAssignableFrom(node.Type);
+            }
+        }
+
+        private class ReflectionEvaluator : ExpressionVisitor
+        {
+            public static Expression Evaluate(Expression node)
+            {
+                var evaluator = new ReflectionEvaluator();
+                return evaluator.Visit(node);
+            }
+
+            private ReflectionEvaluator()
+            {
+            }
+
+            protected override Expression VisitBinary(BinaryExpression node)
+            {
+                if (node.NodeType == ExpressionType.ArrayIndex)
+                {
+                    var left = Visit(node.Left);
+                    var right = Visit(node.Right);
+
+                    if (left.NodeType == ExpressionType.Constant && right.NodeType == ExpressionType.Constant)
+                    {
+                        var array = (Array)((ConstantExpression)left).Value;
+                        var index = (int)((ConstantExpression)right).Value;
+                        return Expression.Constant(
+                            array.GetValue(index),
+                            node.Type);
+                    }
+                }
+
+                return node;
+            }
+
+            protected override Expression VisitMember(MemberExpression node)
+            {
+                if (node.Expression != null)
+                {
+                    // This will handle the situations where we have a local capture variable.
+
+                    var field = node.Member as FieldInfo;
+                    if (field != null)
+                    {
+                        var obj = Visit(node.Expression);
+                        if (obj.NodeType == ExpressionType.Constant)
+                        {
+                            var value = field.GetValue(((ConstantExpression)obj).Value);
+                            return Expression.Constant(value, node.Type);
+                        }
+                    }
+
+                    var property = node.Member as PropertyInfo;
+                    if (property != null)
+                    {
+                        var obj = Visit(node.Expression);
+                        if (obj.NodeType == ExpressionType.Constant)
+                        {
+                            var value = property.GetValue(((ConstantExpression)obj).Value);
+                            return Expression.Constant(value, node.Type);
+                        }
+                    }
+                }
+
+                return node;
+            }
+
+            protected override Expression VisitMethodCall(MethodCallExpression node)
+            {
+                var obj = Visit(node.Object);
+
+                if (obj == null || obj.NodeType == ExpressionType.Constant)
+                {
+                    var arguments = new object[node.Arguments.Count];
+                    for (int i = 0; i < node.Arguments.Count; i++)
+                    {
+                        var argument = Visit(node.Arguments[i]);
+                        if (argument.NodeType != ExpressionType.Constant)
+                        {
+                            return node;
+                        }
+
+                        arguments[i] = ((ConstantExpression)argument).Value;
+                    }
+
+                    var value = node.Method.Invoke(
+                        obj == null ? null : ((ConstantExpression)obj).Value,
+                        arguments);
+
+                    return Expression.Constant(value, node.Type);
+                }
+
+                return node;
             }
         }
     }

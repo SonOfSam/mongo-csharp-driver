@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 * limitations under the License.
 */
 
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -37,16 +38,34 @@ namespace MongoDB.Driver
         public abstract IAggregateFluent<TNewResult> AppendStage<TNewResult>(PipelineStageDefinition<TResult, TNewResult> stage);
 
         /// <inheritdoc />
+        public abstract IAggregateFluent<TNewResult> As<TNewResult>(IBsonSerializer<TNewResult> newResultSerializer);
+
+        /// <inheritdoc />
         public abstract IAggregateFluent<TNewResult> Group<TNewResult>(ProjectionDefinition<TResult, TNewResult> group);
 
         /// <inheritdoc />
         public abstract IAggregateFluent<TResult> Limit(int limit);
 
         /// <inheritdoc />
+        public virtual IAggregateFluent<TNewResult> Lookup<TForeignCollection, TNewResult>(string otherCollectionName, FieldDefinition<TResult> localField, FieldDefinition<TForeignCollection> foreignField, FieldDefinition<TNewResult> @as, AggregateLookupOptions<TForeignCollection, TNewResult> options)
+        {
+            throw new NotImplementedException();
+        }
+
+        /// <inheritdoc />
         public abstract IAggregateFluent<TResult> Match(FilterDefinition<TResult> filter);
 
         /// <inheritdoc />
-        public abstract Task<IAsyncCursor<TResult>> OutAsync(string collectionName, CancellationToken cancellationToken = default(CancellationToken));
+        public abstract IAggregateFluent<TNewResult> OfType<TNewResult>(IBsonSerializer<TNewResult> newResultSerializer) where TNewResult : TResult;
+
+        /// <inheritdoc />
+        public virtual IAsyncCursor<TResult> Out(string collectionName, CancellationToken cancellationToken)
+        {
+            throw new NotImplementedException();
+        }
+
+        /// <inheritdoc />
+        public abstract Task<IAsyncCursor<TResult>> OutAsync(string collectionName, CancellationToken cancellationToken);
 
         /// <inheritdoc />
         public abstract IAggregateFluent<TNewResult> Project<TNewResult>(ProjectionDefinition<TResult, TNewResult> projection);
@@ -58,7 +77,19 @@ namespace MongoDB.Driver
         public abstract IAggregateFluent<TResult> Sort(SortDefinition<TResult> sort);
 
         /// <inheritdoc />
-        public abstract IAggregateFluent<TNewResult> Unwind<TNewResult>(FieldDefinition<TResult> field, IBsonSerializer<TNewResult> resultSerializer = null);
+        public abstract IAggregateFluent<TNewResult> Unwind<TNewResult>(FieldDefinition<TResult> field, IBsonSerializer<TNewResult> newResultSerializer);
+
+        /// <inheritdoc />
+        public virtual IAggregateFluent<TNewResult> Unwind<TNewResult>(FieldDefinition<TResult> field, AggregateUnwindOptions<TNewResult> options)
+        {
+            throw new NotImplementedException();
+        }
+
+        /// <inheritdoc />
+        public virtual IAsyncCursor<TResult> ToCursor(CancellationToken cancellationToken)
+        {
+            throw new NotImplementedException();
+        }
 
         /// <inheritdoc />
         public abstract Task<IAsyncCursor<TResult>> ToCursorAsync(CancellationToken cancellationToken);

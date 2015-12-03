@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -32,9 +32,15 @@ namespace MongoDB.Driver.Core.Connections
     internal static class ConnectionExtensions
     {
         // static methods
+        public static void SendMessage(this IConnection connection, RequestMessage message, MessageEncoderSettings messageEncoderSettings, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNull(connection, nameof(connection));
+            connection.SendMessages(new[] { message }, messageEncoderSettings, cancellationToken);
+        }
+
         public static Task SendMessageAsync(this IConnection connection, RequestMessage message, MessageEncoderSettings messageEncoderSettings, CancellationToken cancellationToken)
         {
-            Ensure.IsNotNull(connection, "connection");
+            Ensure.IsNotNull(connection, nameof(connection));
             return connection.SendMessagesAsync(new[] { message }, messageEncoderSettings, cancellationToken);
         }
     }

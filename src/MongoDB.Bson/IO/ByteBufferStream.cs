@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -93,16 +93,6 @@ namespace MongoDB.Bson.IO
         }
 
         /// <inheritdoc/>
-        public int Capacity
-        {
-            get
-            {
-                ThrowIfDisposed();
-                return _buffer.Capacity;
-            }
-        }
-
-        /// <inheritdoc/>
         public override long Length
         {
             get
@@ -122,7 +112,7 @@ namespace MongoDB.Bson.IO
             }
             set
             {
-                if (value < 0)
+                if (value < 0 || value > int.MaxValue)
                 {
                     throw new ArgumentOutOfRangeException("value");
                 }
@@ -211,16 +201,21 @@ namespace MongoDB.Bson.IO
         }
 
         /// <inheritdoc/>
-        public override void SetLength(long length)
+        public override void SetLength(long value)
         {
-            if (length < 0 || length > Capacity)
+            if (value < 0 || value > int.MaxValue)
             {
-                throw new ArgumentOutOfRangeException("length");
+                throw new ArgumentOutOfRangeException("value");
             }
             ThrowIfDisposed();
-            EnsureWriteable();          
+            EnsureWriteable();
 
-            _length = (int)length;
+            _buffer.EnsureCapacity((int)value);
+            _length = (int)value;
+            if (_position > _length)
+            {
+                _position = _length;
+            }
         }
 
         /// <inheritdoc/>
@@ -301,7 +296,13 @@ namespace MongoDB.Bson.IO
 
         private void PrepareToWrite(int count)
         {
-            _buffer.EnsureCapacity(_position + count);
+            var minimumCapacity = (long)_position + (long)count;
+            if (minimumCapacity > int.MaxValue)
+            {
+                throw new IOException("Stream was too long.");
+            }
+
+            _buffer.EnsureCapacity((int)minimumCapacity);
             _buffer.Length = _buffer.Capacity;
             if (_length < _position)
             {
@@ -337,7 +338,8 @@ namespace MongoDB.Bson.IO
 
         private void ThrowIfEndOfStream(int count)
         {
-            if (_position + count > _length)
+            var minimumLength = (long)_position + (long)count;
+            if (_length < minimumLength)
             {
                 if (_position < _length)
                 {
@@ -366,19 +368,19 @@ namespace MongoDB.Bson.IO
             ThrowIfDisposed();
             ThrowIfEndOfStream(1);
 
-            var startPosition = _position;
-            var nullPosition = FindNullByte();
-            var length = nullPosition - startPosition;
-
-            var segment = _buffer.AccessBackingBytes(startPosition);
-            if (segment.Count >= length)
+            var segment = _buffer.AccessBackingBytes(_position);
+            var index = Array.IndexOf<byte>(segment.Array, 0, segment.Offset, segment.Count);
+            if (index != -1)
             {
-                _position = nullPosition + 1; // advance over null byte
+                var length = index - segment.Offset;
+                _position += length + 1; // advance over the null byte
                 return new ArraySegment<byte>(segment.Array, segment.Offset, length); // without the null byte
             }
             else
             {
-                var cstring = ReadBytes(length + 1); // read null byte also
+                var nullPosition = FindNullByte();
+                var length = nullPosition - _position;
+                var cstring = ReadBytes(length + 1); // advance over the null byte
                 return new ArraySegment<byte>(cstring, 0, length); // without the null byte
             }
         }
@@ -657,7 +659,7 @@ namespace MongoDB.Bson.IO
             var segment = _buffer.AccessBackingBytes(_position);
             if (segment.Count >= 12)
             {
-                value.GetBytes(segment.Array, segment.Offset);
+                value.ToByteArray(segment.Array, segment.Offset);
             }
             else
             {

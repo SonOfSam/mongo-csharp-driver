@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -40,8 +40,8 @@ namespace MongoDB.Driver
         /// <param name="value">The value.</param>
         public Tag(string name, string value)
         {
-            _name = Ensure.IsNotNull(name, "name");
-            _value = Ensure.IsNotNull(value, "value");
+            _name = Ensure.IsNotNull(name, nameof(name));
+            _value = Ensure.IsNotNull(value, nameof(value));
         }
 
         // properties

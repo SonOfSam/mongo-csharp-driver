@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -88,10 +88,14 @@ namespace MongoDB.Driver.Tests
         {
             if (!_isMasterSlavePair)
             {
-                _database.Drop();
-                Assert.IsFalse(_server.DatabaseExists(_database.Name));
-                _collection.Insert(new BsonDocument("x", 1));
-                Assert.IsTrue(_server.DatabaseExists(_database.Name));
+                var databaseNamespace = CoreTestConfiguration.GetDatabaseNamespaceForTestFixture();
+                var database = _server.GetDatabase(databaseNamespace.DatabaseName);
+                var collection = database.GetCollection("test");
+
+                database.Drop();
+                Assert.IsFalse(_server.DatabaseExists(database.Name));
+                collection.Insert(new BsonDocument("x", 1));
+                Assert.IsTrue(_server.DatabaseExists(database.Name));
             }
         }
 
@@ -100,13 +104,17 @@ namespace MongoDB.Driver.Tests
         {
             if (!_isMasterSlavePair)
             {
-                _collection.Insert(new BsonDocument());
-                var databaseNames = _server.GetDatabaseNames();
-                Assert.IsTrue(databaseNames.Contains(_database.Name));
+                var databaseNamespace = CoreTestConfiguration.GetDatabaseNamespaceForTestFixture();
+                var database = _server.GetDatabase(databaseNamespace.DatabaseName);
+                var collection = database.GetCollection("test");
 
-                _server.DropDatabase(_database.Name);
+                collection.Insert(new BsonDocument());
+                var databaseNames = _server.GetDatabaseNames();
+                Assert.IsTrue(databaseNames.Contains(database.Name));
+
+                _server.DropDatabase(database.Name);
                 databaseNames = _server.GetDatabaseNames();
-                Assert.IsFalse(databaseNames.Contains(_database.Name));
+                Assert.IsFalse(databaseNames.Contains(database.Name));
             }
         }
 
@@ -187,22 +195,6 @@ namespace MongoDB.Driver.Tests
         }
 
         [Test]
-        public void TestPassives()
-        {
-            if (_isReplicaSet)
-            {
-                var isMasterResult = _database.RunCommand("isMaster").Response;
-                BsonValue passives;
-                int passiveCount = 0;
-                if (isMasterResult.TryGetValue("passives", out passives))
-                {
-                    passiveCount = passives.AsBsonArray.Count;
-                }
-                Assert.AreEqual(passiveCount, _server.Passives.Length);
-            }
-        }
-
-        [Test]
         public void TestPing()
         {
             _server.Ping();
@@ -234,35 +226,6 @@ namespace MongoDB.Driver.Tests
             else
             {
                 Assert.IsNull(_server.ReplicaSetName);
-            }
-        }
-
-        [Test]
-        public void TestReplicaSetMemberCount()
-        {
-            if (_isReplicaSet)
-            {
-                var isMasterResult = _database.RunCommand("isMaster").Response;
-                BsonValue hosts;
-                int hostCount = 0;
-                if (isMasterResult.TryGetValue("hosts", out hosts))
-                {
-                    hostCount = hosts.AsBsonArray.Count;
-                }
-                BsonValue passives;
-                int passiveCount = 0;
-                if (isMasterResult.TryGetValue("passives", out passives))
-                {
-                    passiveCount = passives.AsBsonArray.Count;
-                }
-                BsonValue arbiters;
-                int arbiterCount = 0;
-                if (isMasterResult.TryGetValue("arbiters", out arbiters))
-                {
-                    arbiterCount = arbiters.AsBsonArray.Count;
-                }
-                Assert.AreEqual(hostCount + passiveCount + arbiterCount,
-                    _server.Instances.Length);
             }
         }
 

@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -99,7 +99,7 @@ namespace MongoDB.Driver.Specifications.server_selection
                     throw new NotSupportedException("Unknown read preference mode: " + readPreferenceDescription["mode"]);
             }
 
-            return readPreference.With(tagSets: Optional.Create(tagSets));
+            return readPreference.With(tagSets: tagSets);
         }
 
         private ClusterDescription BuildClusterDescription(BsonDocument topologyDescription)
@@ -107,7 +107,7 @@ namespace MongoDB.Driver.Specifications.server_selection
             var clusterType = GetClusterType(topologyDescription["type"].ToString());
             var servers = BuildServerDescriptions((BsonArray)topologyDescription["servers"]);
 
-            return new ClusterDescription(_clusterId, clusterType, servers);
+            return new ClusterDescription(_clusterId, ClusterConnectionMode.Automatic, clusterType, servers);
         }
 
         private IEnumerable<ServerDescription> BuildServerDescriptions(BsonArray serverDescriptions)

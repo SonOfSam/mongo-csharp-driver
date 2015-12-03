@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -40,8 +40,8 @@ namespace MongoDB.Driver.Core.Operations
         /// <param name="messageEncoderSettings">The message encoder settings.</param>
         public DatabaseExistsOperation(DatabaseNamespace databaseNamespace, MessageEncoderSettings messageEncoderSettings)
         {
-            _databaseNamespace = Ensure.IsNotNull(databaseNamespace, "databaseNamespace");
-            _messageEncoderSettings = Ensure.IsNotNull(messageEncoderSettings, "messageEncoderSettings");
+            _databaseNamespace = Ensure.IsNotNull(databaseNamespace, nameof(databaseNamespace));
+            _messageEncoderSettings = Ensure.IsNotNull(messageEncoderSettings, nameof(messageEncoderSettings));
         }
 
         // properties
@@ -69,12 +69,22 @@ namespace MongoDB.Driver.Core.Operations
 
         // methods
         /// <inheritdoc/>
+        public bool Execute(IReadBinding binding, CancellationToken cancellationToken)
+        {
+            Ensure.IsNotNull(binding, nameof(binding));
+            var operation = new ListDatabasesOperation(_messageEncoderSettings);
+            var result = operation.Execute(binding, cancellationToken);
+            var list = result.ToList(cancellationToken);
+            return list.Any(x => x["name"] == _databaseNamespace.DatabaseName);
+        }
+
+        /// <inheritdoc/>
         public async Task<bool> ExecuteAsync(IReadBinding binding, CancellationToken cancellationToken)
         {
-            Ensure.IsNotNull(binding, "binding");
+            Ensure.IsNotNull(binding, nameof(binding));
             var operation = new ListDatabasesOperation(_messageEncoderSettings);
             var result = await operation.ExecuteAsync(binding, cancellationToken).ConfigureAwait(false);
-            var list = await result.ToListAsync();
+            var list = await result.ToListAsync(cancellationToken).ConfigureAwait(false);
             return list.Any(x => x["name"] == _databaseNamespace.DatabaseName);
         }
     }

@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -29,9 +29,19 @@ namespace MongoDB.Driver
     public sealed class UpdateOptions
     {
         // fields
+        private bool? _bypassDocumentValidation;
         private bool _isUpsert;
 
         // properties
+        /// <summary>
+        /// Gets or sets a value indicating whether to bypass document validation.
+        /// </summary>
+        public bool? BypassDocumentValidation
+        {
+            get { return _bypassDocumentValidation; }
+            set { _bypassDocumentValidation = value; }
+        }
+
         /// <summary>
         /// Gets or sets a value indicating whether to insert the document if it doesn't already exist.
         /// </summary>

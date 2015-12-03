@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -40,69 +40,104 @@ namespace MongoDB.Driver.Tests
 
         public void EnqueueResult<TResult>(TResult result)
         {
-            EnqueueResult(Task.FromResult(result));
-        }
-
-        public void EnqueueResult<TResult>(Task<TResult> result)
-        {
             _results.Enqueue(result);
         }
 
         public void EnqueueException<TResult>(Exception exception)
         {
-            var tcs = new TaskCompletionSource<TResult>(TaskCreationOptions.None);
-            tcs.TrySetException(exception);
-            _results.Enqueue(tcs.Task);
+            _results.Enqueue(exception);
         }
 
-        public Task<TResult> ExecuteReadOperationAsync<TResult>(IReadBinding binding, IReadOperation<TResult> operation, TimeSpan timeout, CancellationToken cancellationToken)
+        public TResult ExecuteReadOperation<TResult>(IReadBinding binding, IReadOperation<TResult> operation, CancellationToken cancellationToken)
         {
             _calls.Enqueue(new ReadCall<TResult>
             {
                 Binding = binding,
                 Operation = operation,
-                Timeout = timeout,
                 CancellationToken = cancellationToken
             });
 
-            var result = Task.FromResult<TResult>(default(TResult));
-            if(_results.Count > 0)
+            if (_results.Count > 0)
             {
-                result = (Task<TResult>)_results.Dequeue();
+                var result = _results.Dequeue();
+
+                var exception = result as Exception;
+                if (exception != null)
+                {
+                    throw exception;
+                }
+
+                return (TResult)result;
             }
 
-            return result;
+            return default(TResult);
         }
 
-        public Task<TResult> ExecuteWriteOperationAsync<TResult>(IWriteBinding binding, IWriteOperation<TResult> operation, TimeSpan timeout, CancellationToken cancellationToken)
+        public Task<TResult> ExecuteReadOperationAsync<TResult>(IReadBinding binding, IReadOperation<TResult> operation, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var result = ExecuteReadOperation<TResult>(binding, operation, cancellationToken);
+                return Task.FromResult(result);
+            }
+            catch (Exception ex)
+            {
+                var tcs = new TaskCompletionSource<TResult>();
+                tcs.TrySetException(ex);
+                return tcs.Task;
+            }
+        }
+
+        public TResult ExecuteWriteOperation<TResult>(IWriteBinding binding, IWriteOperation<TResult> operation, CancellationToken cancellationToken)
         {
             _calls.Enqueue(new WriteCall<TResult>
             {
                 Binding = binding,
                 Operation = operation,
-                Timeout = timeout,
                 CancellationToken = cancellationToken
             });
 
-            var result = Task.FromResult<TResult>(default(TResult));
             if (_results.Count > 0)
             {
-                result = (Task<TResult>)_results.Dequeue();
+                var result = _results.Dequeue();
+
+                var exception = result as Exception;
+                if (exception != null)
+                {
+                    throw exception;
+                }
+
+                return (TResult)result;
             }
 
-            return result;
+            return default(TResult);
+        }
+
+        public Task<TResult> ExecuteWriteOperationAsync<TResult>(IWriteBinding binding, IWriteOperation<TResult> operation, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var result = ExecuteWriteOperation<TResult>(binding, operation, cancellationToken);
+                return Task.FromResult(result);
+            }
+            catch (Exception ex)
+            {
+                var tcs = new TaskCompletionSource<TResult>();
+                tcs.TrySetException(ex);
+                return tcs.Task;
+            }
         }
 
         public ReadCall<TResult> GetReadCall<TResult>()
         {
-            if(_calls.Count == 0)
+            if (_calls.Count == 0)
             {
                 throw new InvalidOperationException("No read operation was executed.");
             }
 
             var call = _calls.Dequeue();
             var readCall = call as ReadCall<TResult>;
-            if(readCall == null)
+            if (readCall == null)
             {
                 throw new InvalidOperationException(string.Format("Expected a call of type {0} but had {1}.", typeof(ReadCall<TResult>), call.GetType()));
             }
@@ -112,14 +147,14 @@ namespace MongoDB.Driver.Tests
 
         public WriteCall<TResult> GetWriteCall<TResult>()
         {
-            if(_calls.Count == 0)
+            if (_calls.Count == 0)
             {
-                throw new InvalidOperationException("No read operation was executed.");
+                throw new InvalidOperationException("No write operation was executed.");
             }
 
             var call = _calls.Dequeue();
             var writeCall = call as WriteCall<TResult>;
-            if(writeCall == null)
+            if (writeCall == null)
             {
                 throw new InvalidOperationException(string.Format("Expected a call of type {0} but had {1}.", typeof(WriteCall<TResult>), call.GetType()));
             }
@@ -131,7 +166,6 @@ namespace MongoDB.Driver.Tests
         {
             public IReadBinding Binding { get; set; }
             public IReadOperation<TResult> Operation { get; set; }
-            public TimeSpan Timeout { get; set; }
             public CancellationToken CancellationToken { get; set; }
         }
 
@@ -139,7 +173,6 @@ namespace MongoDB.Driver.Tests
         {
             public IWriteBinding Binding { get; set; }
             public IWriteOperation<TResult> Operation { get; set; }
-            public TimeSpan Timeout { get; set; }
             public CancellationToken CancellationToken { get; set; }
         }
     }

@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 * limitations under the License.
 */
 
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using MongoDB.Driver.Core.Bindings;
@@ -52,12 +53,14 @@ namespace MongoDB.Driver.Operations
         }
 
         // methods
-        public async Task<bool> ExecuteAsync(IWriteBinding binding, CancellationToken cancellationToken)
+        public bool Execute(IWriteBinding binding, CancellationToken cancellationToken)
         {
-            using (var channelSource = await binding.GetWriteChannelSourceAsync(cancellationToken).ConfigureAwait(false))
+            using (var channelSource = binding.GetWriteChannelSource(cancellationToken))
+            using (var channel = channelSource.GetChannel(cancellationToken))
+            using (var channelBinding = new ChannelReadWriteBinding(channelSource.Server, channel))
             {
                 IWriteOperation<bool> operation;
-                if (channelSource.ServerDescription.Version >= __serverVersionSupportingUserManagementCommands)
+                if (channel.ConnectionDescription.ServerVersion >= __serverVersionSupportingUserManagementCommands)
                 {
                     operation = new AddUserUsingUserManagementCommandsOperation(_databaseNamespace, _username, _passwordHash, _readOnly, _messageEncoderSettings);
                 }
@@ -66,8 +69,13 @@ namespace MongoDB.Driver.Operations
                     operation = new AddUserUsingSystemUsersCollectionOperation(_databaseNamespace, _username, _passwordHash, _readOnly, _messageEncoderSettings);
                 }
 
-                return await operation.ExecuteAsync(channelSource, cancellationToken).ConfigureAwait(false);
+                return operation.Execute(channelBinding, cancellationToken);
             }
+        }
+
+        public Task<bool> ExecuteAsync(IWriteBinding binding, CancellationToken cancellationToken)
+        {
+            throw new NotSupportedException();
         }
     }
 }

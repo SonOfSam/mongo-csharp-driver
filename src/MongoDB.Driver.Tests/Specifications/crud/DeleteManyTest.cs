@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -40,9 +40,16 @@ namespace MongoDB.Driver.Tests.Specifications.crud
             return new DeleteResult.Acknowledged(expectedResult["deletedCount"].ToInt64());
 
         }
-        protected override Task<DeleteResult> ExecuteAndGetResultAsync(IMongoCollection<BsonDocument> collection)
+        protected override DeleteResult ExecuteAndGetResult(IMongoCollection<BsonDocument> collection, bool async)
         {
-            return collection.DeleteManyAsync(_filter);
+            if (async)
+            {
+                return collection.DeleteManyAsync(_filter).GetAwaiter().GetResult();
+            }
+            else
+            {
+                return collection.DeleteMany(_filter);
+            }
         }
 
         protected override void VerifyResult(DeleteResult actualResult, DeleteResult expectedResult)

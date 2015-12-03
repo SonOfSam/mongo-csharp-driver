@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ using System.Linq;
 using System.Reflection;
 using FluentAssertions;
 using MongoDB.Bson.IO;
+using MongoDB.Bson.TestHelpers;
 using NSubstitute;
 using NUnit.Framework;
 
@@ -111,28 +112,6 @@ namespace MongoDB.Bson.Tests.IO
             var result = subject.CanWrite;
 
             result.Should().Be(expectedResult);
-        }
-
-        [Test]
-        public void Capacity_get_should_call_buffer()
-        {
-            var subject = CreateSubject();
-            subject.Buffer.Capacity.Returns(1);
-
-            var result = subject.Capacity;
-
-            result.Should().Be(1);
-            var temp = subject.Buffer.Received(1).Capacity;
-        }
-
-        [Test]
-        public void Capacity_get_should_throw_when_subject_is_disposed()
-        {
-            var subject = CreateDisposedSubject();
-
-            Action action = () => { var _ = subject.Capacity; };
-
-            action.ShouldThrow<ObjectDisposedException>().And.ObjectName.Should().Be("ByteBufferStream");
         }
 
         [Test]
@@ -265,11 +244,13 @@ namespace MongoDB.Bson.Tests.IO
         }
 
         [Test]
-        public void Position_set_should_throw_when_value_is_less_than_zero()
+        public void Position_set_should_throw_when_value_is_invalid(
+            [Values(-1L, (long)int.MaxValue + 1)]
+            long value)
         {
             var subject = CreateSubject();
 
-            Action action = () => subject.Position = -1;
+            Action action = () => subject.Position = value;
 
             action.ShouldThrow<ArgumentOutOfRangeException>().And.ParamName.Should().Be("value");
         }
@@ -282,6 +263,22 @@ namespace MongoDB.Bson.Tests.IO
             Action action = () => subject.Position = 1;
 
             action.ShouldThrow<ObjectDisposedException>().And.ObjectName.Should().Be("ByteBufferStream");
+        }
+
+        [Test]
+        [Requires64BitProcess]
+        public void PrepareToWrite_should_throw_when_stream_would_exceed_2GB()
+        {
+            using (var buffer = new MultiChunkBuffer(BsonChunkPool.Default))
+            using (var subject = new ByteBufferStream(buffer))
+            {
+                var bytes = new byte[int.MaxValue / 2 + 1024];
+                subject.Write(bytes, 0, bytes.Length);
+
+                Action action = () => subject.Write(bytes, 0, bytes.Length); // indirectly calls private PrepareToWrite method
+
+                action.ShouldThrow<IOException>();
+            }
         }
 
         [TestCase(1, 0)]
@@ -914,29 +911,41 @@ namespace MongoDB.Bson.Tests.IO
         }
 
         [Test]
-        public void SetLength_should_have_expected_effect(
+        public void SetLength_should_set_length(
             [Values(0, 1, 2, 3)]
             long length)
         {
             var subject = CreateSubject();
-            subject.Buffer.Capacity.Returns(3);
 
             subject.SetLength(length);
 
             subject.Length.Should().Be(length);
+            subject.Buffer.Received(1).EnsureCapacity((int)length);
+        }
+
+        [Test]
+        public void SetLength_should_set_position_when_position_is_greater_than_new_length(
+            [Values(0, 1, 2, 3)]
+            long length)
+        {
+            var subject = CreateSubject();
+            subject.Position = length + 1;
+
+            subject.SetLength(length);
+
+            subject.Position.Should().Be(length);
         }
 
         [Test]
         public void SetLength_should_throw_when_length_is_out_of_range(
-            [Values(-1, 4)]
+            [Values(-1, (long)int.MaxValue + 1)]
             long length)
         {
             var subject = CreateSubject();
-            subject.Buffer.Capacity.Returns(3);
 
             Action action = () => subject.SetLength(length);
 
-            action.ShouldThrow<ArgumentOutOfRangeException>().And.ParamName.Should().Be("length");
+            action.ShouldThrow<ArgumentOutOfRangeException>().And.ParamName.Should().Be("value");
         }
 
         [Test]
@@ -989,6 +998,22 @@ namespace MongoDB.Bson.Tests.IO
             Action action = () => subject.SkipCString();
 
             action.ShouldThrow<ObjectDisposedException>().And.ObjectName.Should().Be("ByteBufferStream");
+        }
+
+        [Test]
+        public void ThrowIfEndOfStream_should_throw_when_position_plus_length_exceeds_2GB()
+        {
+            using (var buffer = new ByteArrayBuffer(new byte[1024]))
+            using (var subject = new ByteBufferStream(buffer))
+            {
+                subject.Position = 1024;
+                subject.WriteInt32(int.MaxValue - 128);
+                subject.Position = 1024;
+
+                Action action = () => subject.ReadSlice(); // indirectly calls private ThrowIfEndOfStream method
+
+                action.ShouldThrow<EndOfStreamException>();
+            }
         }
 
         [Test]

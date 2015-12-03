@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -44,9 +44,9 @@ namespace MongoDB.Driver.Core.Operations
         /// <param name="messageEncoderSettings">The message encoder settings.</param>
         public ExplainOperation(DatabaseNamespace databaseNamespace, BsonDocument command, MessageEncoderSettings messageEncoderSettings)
         {
-            _databaseNamespace = Ensure.IsNotNull(databaseNamespace, "databaseNamespace");
-            _command = Ensure.IsNotNull(command, "command");
-            _messageEncoderSettings = Ensure.IsNotNull(messageEncoderSettings, "messageEncoderSettings");
+            _databaseNamespace = Ensure.IsNotNull(databaseNamespace, nameof(databaseNamespace));
+            _command = Ensure.IsNotNull(command, nameof(command));
+            _messageEncoderSettings = Ensure.IsNotNull(messageEncoderSettings, nameof(messageEncoderSettings));
             _verbosity = ExplainVerbosity.QueryPlanner;
         }
 
@@ -96,34 +96,36 @@ namespace MongoDB.Driver.Core.Operations
             set { _verbosity = value; }
         }
 
+        // public methods
+        /// <inheritdoc/>
+        public BsonDocument Execute(IReadBinding binding, CancellationToken cancellationToken)
+        {
+            var operation = CreateReadOperation();
+            return operation.Execute(binding, cancellationToken);
+        }
+
+        /// <inheritdoc/>
+        public BsonDocument Execute(IWriteBinding binding, CancellationToken cancellationToken)
+        {
+            var operation = CreateWriteOperation();
+            return operation.Execute(binding, cancellationToken);
+        }
+
         /// <inheritdoc/>
         public Task<BsonDocument> ExecuteAsync(IReadBinding binding, CancellationToken cancellationToken)
         {
-            var command = CreateCommand();
-
-            var operation = new ReadCommandOperation<BsonDocument>(
-                _databaseNamespace,
-                command,
-                BsonDocumentSerializer.Instance,
-                _messageEncoderSettings);
-
+            var operation = CreateReadOperation();
             return operation.ExecuteAsync(binding, cancellationToken);
         }
 
         /// <inheritdoc/>
         public Task<BsonDocument> ExecuteAsync(IWriteBinding binding, CancellationToken cancellationToken)
         {
-            var command = CreateCommand();
-
-            var operation = new WriteCommandOperation<BsonDocument>(
-                _databaseNamespace,
-                command,
-                BsonDocumentSerializer.Instance,
-                _messageEncoderSettings);
-
+            var operation = CreateWriteOperation();
             return operation.ExecuteAsync(binding, cancellationToken);
         }
 
+        // private methods
         private static string ConvertVerbosityToString(ExplainVerbosity verbosity)
         {
             switch (verbosity)
@@ -147,6 +149,26 @@ namespace MongoDB.Driver.Core.Operations
                 { "explain", _command },
                 { "verbosity", ConvertVerbosityToString(_verbosity) }
             };
+        }
+
+        private ReadCommandOperation<BsonDocument> CreateReadOperation()
+        {
+            var command = CreateCommand();
+            return new ReadCommandOperation<BsonDocument>(
+                _databaseNamespace,
+                command,
+                BsonDocumentSerializer.Instance,
+                _messageEncoderSettings);
+        }
+
+        private WriteCommandOperation<BsonDocument> CreateWriteOperation()
+        {
+            var command = CreateCommand();
+            return new WriteCommandOperation<BsonDocument>(
+                _databaseNamespace,
+                command,
+                BsonDocumentSerializer.Instance,
+                _messageEncoderSettings);
         }
     }
 }

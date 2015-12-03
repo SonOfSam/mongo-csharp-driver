@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -58,9 +58,16 @@ namespace MongoDB.Driver.Tests.Specifications.crud
             return new ReplaceOneResult.Acknowledged(expectedResult["matchedCount"].ToInt64(), modifiedCount, upsertedId);
         }
 
-        protected override Task<ReplaceOneResult> ExecuteAndGetResultAsync(IMongoCollection<BsonDocument> collection)
+        protected override ReplaceOneResult ExecuteAndGetResult(IMongoCollection<BsonDocument> collection, bool async)
         {
-            return collection.ReplaceOneAsync(_filter, _replacement, _options);
+            if (async)
+            {
+                return collection.ReplaceOneAsync(_filter, _replacement, _options).GetAwaiter().GetResult();
+            }
+            else
+            {
+                return collection.ReplaceOne(_filter, _replacement, _options);
+            }
         }
 
         protected override void VerifyResult(ReplaceOneResult actualResult, ReplaceOneResult expectedResult)
@@ -77,9 +84,9 @@ namespace MongoDB.Driver.Tests.Specifications.crud
             }
         }
 
-        protected override async Task VerifyCollectionAsync(IMongoCollection<BsonDocument> collection, BsonArray expectedData)
+        protected override void VerifyCollection(IMongoCollection<BsonDocument> collection, BsonArray expectedData)
         {
-            var data = await collection.Find("{}").ToListAsync();
+            var data = collection.FindSync("{}").ToList();
 
             if (ClusterDescription.Servers[0].Version < new SemanticVersion(2, 6, 0) && _options.IsUpsert)
             {

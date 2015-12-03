@@ -1,4 +1,4 @@
-﻿/* Copyright 2013-2014 MongoDB Inc.
+﻿/* Copyright 2013-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -32,11 +32,16 @@ namespace MongoDB.Driver.Core.Bindings
         // constructors
         public ChannelChannelSource(IServer server, IChannelHandle channel)
         {
-            _server = Ensure.IsNotNull(server, "server");
-            _channel = Ensure.IsNotNull(channel, "channel");
+            _server = Ensure.IsNotNull(server, nameof(server));
+            _channel = Ensure.IsNotNull(channel, nameof(channel));
         }
 
         // properties
+        public IServer Server
+        {
+            get { return _server; }
+        }
+
         public ServerDescription ServerDescription
         {
             get { return _server.Description; }
@@ -53,10 +58,21 @@ namespace MongoDB.Driver.Core.Bindings
             }
         }
 
+        public IChannelHandle GetChannel(CancellationToken cancellationToken)
+        {
+            ThrowIfDisposed();
+            return GetChannelHelper();
+        }
+
         public Task<IChannelHandle> GetChannelAsync(CancellationToken cancellationToken)
         {
             ThrowIfDisposed();
-            return Task.FromResult(_channel.Fork());
+            return Task.FromResult(GetChannelHelper());
+        }
+
+        private IChannelHandle GetChannelHelper()
+        {
+            return _channel.Fork();
         }
 
         private void ThrowIfDisposed()

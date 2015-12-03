@@ -1,4 +1,4 @@
-﻿/* Copyright 2010-2014 MongoDB Inc.
+/* Copyright 2010-2015 MongoDB Inc.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -32,8 +32,8 @@ namespace MongoDB.Driver
 
         public BatchTransformingAsyncCursor(IAsyncCursor<TFromDocument> wrapped, Func<IEnumerable<TFromDocument>, IEnumerable<TToDocument>> transformer)
         {
-            _wrapped = Ensure.IsNotNull(wrapped, "wrapped");
-            _transformer = Ensure.IsNotNull(transformer, "transformer");
+            _wrapped = Ensure.IsNotNull(wrapped, nameof(wrapped));
+            _transformer = Ensure.IsNotNull(transformer, nameof(transformer));
         }
 
         public IEnumerable<TToDocument> Current
@@ -50,10 +50,26 @@ namespace MongoDB.Driver
             }
         }
 
+        // methods
+        public bool MoveNext(CancellationToken cancellationToken)
+        {
+            ThrowIfDisposed();
+            while (_wrapped.MoveNext(cancellationToken))
+            {
+                _current = _transformer(_wrapped.Current).ToList();
+                if (_current.Count > 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         public async Task<bool> MoveNextAsync(CancellationToken cancellationToken)
         {
             ThrowIfDisposed();
-            while (await _wrapped.MoveNextAsync(cancellationToken))
+            while (await _wrapped.MoveNextAsync(cancellationToken).ConfigureAwait(false))
             {
                 _current = _transformer(_wrapped.Current).ToList();
                 if (_current.Count > 0)
